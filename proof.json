@@ -1,0 +1,23 @@
+{
+  "what": "Why an x402 service should accept Nano (XNO) as a settlement asset beside USDC",
+  "generated_utc": "2026-10-03",
+  "live_proof": {
+    "x402_endpoint_settling_in_xno": "https://extract.paypercall.dev/api/v1/extract",
+    "returns": "HTTP 402 payment_required: 'Pay 0.0001 XNO to nano_1yo6c1t... and retry with X-PAYMENT header'",
+    "note": "standard x402 402->pay->retry flow with Nano as the settlement asset; also accepts X-BALANCE for a prepaid Nano account"
+  },
+  "xno": {
+    "fee": "0 (feeless by protocol)",
+    "finality": "measured live, not asserted; every raw sample incl. failures at nano-finality-proof GET /v1/finality/samples and /v1/finality/compare",
+    "settlement": "irreversible once confirmed",
+    "min_practical_amount": "sub-cent is economic because the fee is zero"
+  },
+  "usdc_x402_reference": {
+    "fee": "gas, non-zero and variable (paid per transfer)",
+    "finality": "probabilistic, depends on block confirmations",
+    "settlement": "revocable until final",
+    "note": "reference properties from public chain documentation; NOT measured in this repo. Verify against your own rail."
+  },
+  "position": "dual-rail: add XNO as an ACCEPTED asset beside USDC, never instead of it. Nothing existing breaks; a config change adds it.",
+  "sources": ["dhyabi2/dual-rail", "dhyabi2/nano-finality-proof", "x402-foundation/x402#3512"]
+}
