@@ -1,0 +1,31 @@
+{
+  "name": "dual-rail",
+  "version": "1.0.0",
+  "description": "Add XNO beside USDC/x402, never instead of it: one appended accepts[] entry, and a verifier that proves both rails still work. Middleware only - the CLI (inspect/add/verify) is the Python one.",
+  "main": "dual-rail.js",
+  "scripts": {
+    "test": "node --test test/dual-rail.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "x402",
+    "nano",
+    "xno",
+    "payments",
+    "express",
+    "middleware",
+    "agent"
+  ],
+  "license": "MIT",
+  "dependencies": {},
+  "files": [
+    "dual-rail.js",
+    "challenge.js",
+    "money.js",
+    "address.js",
+    "blake2b.js",
+    "node-client.js"
+  ]
+}

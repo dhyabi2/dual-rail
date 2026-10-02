@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dual-rail"
+version = "1.0.0"
+description = "Add XNO beside USDC/x402, never instead of it: one appended accepts[] entry, and a verifier that proves both rails still work."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+keywords = ["x402", "nano", "xno", "payments", "wsgi", "middleware", "agent"]
+
+[project.scripts]
+dual-rail = "cli:main"
+
+[tool.setuptools]
+py-modules = ["adapter", "challenge", "verify", "money", "nanoaddr", "nanonode",
+              "cli", "fakenode", "testhost"]

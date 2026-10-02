@@ -1,0 +1,120 @@
+dual-rail verify, run against a live endpoint
+=============================================
+
+Captured by `tests/capture_live_verify.py`, reproducible with one command.
+
+WHAT THIS IS, PRECISELY. The endpoint is a real HTTP server: a real socket, a
+real 402 written by a host that has never heard of Nano (testhost.py), the
+adapter really mounted in front of it, and the verifier really making HTTP
+requests to it. It is NOT a public URL - it is 127.0.0.1 on an ephemeral port,
+rewritten to https://example.dev/report below so the transcript reads the way
+it will when it is run against a customer's endpoint. The Nano node behind it
+is fakenode.FakeNode, because this repository must not require a node to prove
+its own correctness.
+
+So this transcript proves the verifier and the adapter work end to end over
+HTTP. It does NOT prove anything about a third party's deployment. The
+definition-of-done line "run against at least one live endpoint" is met in the
+first sense and remains open in the second until a service that is not ours
+mounts this and we run the same command at its URL. Said plainly rather than
+left for a reader to discover.
+
+Note the two runs use DIFFERENT payment blocks. One payment buys one call, so
+the second run needs its own: that is the replay protection, not a flaky rail.
+
+$ dual-rail verify https://example.dev/report --payment 9F2C000000000000000000000000000000000000000000000000000000000000
+
+dual-rail verify https://example.dev/report
+
+[pass] 402 challenge reachable                HTTP 402, x-402-version: 2
+[pass] pre-existing rails intact              2 entries: USDC/base, USDC/solana  (unchanged)
+[pass] nano entry present and last            nano:mainnet XNO 0.0001 -> nano_3t6k35g...
+[pass] nano payTo passes checksum             valid
+[pass] existing rail still settles            2 pre-existing challenges well-formed
+[pass] nano rail settles                      block 9F2C0000... -> HTTP 200
+[pass] node outage falls through              unverifiable proof -> HTTP 402 with all 3 entries, no 5xx
+
+verify: 7/7 pass - both rails live, existing rails unchanged.
+
+
+exit=0
+======================================================================
+$ dual-rail verify https://example.dev/report --payment A17D000000000000000000000000000000000000000000000000000000000000 --json
+{
+  "url": "https://example.dev/report",
+  "checks": [
+    {
+      "name": "402 challenge reachable",
+      "pass": true,
+      "detail": "HTTP 402, x-402-version: 2"
+    },
+    {
+      "name": "pre-existing rails intact",
+      "pass": true,
+      "detail": "2 entries: USDC/base, USDC/solana  (unchanged)"
+    },
+    {
+      "name": "nano entry present and last",
+      "pass": true,
+      "detail": "nano:mainnet XNO 0.0001 -> nano_3t6k35g..."
+    },
+    {
+      "name": "nano payTo passes checksum",
+      "pass": true,
+      "detail": "valid"
+    },
+    {
+      "name": "existing rail still settles",
+      "pass": true,
+      "detail": "2 pre-existing challenges well-formed"
+    },
+    {
+      "name": "nano rail settles",
+      "pass": true,
+      "detail": "block A17D0000... -> HTTP 200"
+    },
+    {
+      "name": "node outage falls through",
+      "pass": true,
+      "detail": "unverifiable proof -> HTTP 402 with all 3 entries, no 5xx"
+    }
+  ],
+  "pass": true,
+  "rails_before": [
+    {
+      "scheme": "exact",
+      "network": "base",
+      "asset": "USDC",
+      "maxAmountRequired": "0.01"
+    },
+    {
+      "scheme": "exact",
+      "network": "solana",
+      "asset": "USDC",
+      "maxAmountRequired": "0.01"
+    }
+  ],
+  "rails_after": [
+    {
+      "scheme": "exact",
+      "network": "base",
+      "asset": "USDC",
+      "maxAmountRequired": "0.01"
+    },
+    {
+      "scheme": "exact",
+      "network": "solana",
+      "asset": "USDC",
+      "maxAmountRequired": "0.01"
+    },
+    {
+      "scheme": "exact",
+      "network": "nano:mainnet",
+      "asset": "XNO",
+      "maxAmountRequired": "0.0001"
+    }
+  ]
+}
+
+exit=0
+======================================================================
