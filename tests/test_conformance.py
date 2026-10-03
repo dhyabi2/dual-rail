@@ -21,9 +21,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import adapter as _adapter
 import challenge as _challenge
+import declaration as _declaration
 import fakenode
 import money
 import nanoaddr
+import network as _network
 import testhost
 import verify as _verify
 
@@ -64,6 +66,14 @@ def build_matrix():
             json.dumps({"network": "nano:mainnet"}),
             "not json", "", "e30=", "[]",
         ],
+        "networks": [
+            "nano:mainnet", "nano-mainnet", "NANO:MAINNET", " nano:mainnet ",
+            "Nano-Mainnet", "nano", "xno", "XNO", "nano:testnet", "nano-beta",
+            "xno:mainnet", "xno-mainnet", "nano:", "nanomainnet", "base",
+            "solana:mainnet", "eip155:8453", "", "   ", None, 42, True, [], {},
+            "nano:mainnet:extra", "nano_mainnet", "nano:main", "a:b",
+        ],
+        "declarations": _declaration_cases(),
         "payments": [
             {"header": _proof(BLOCK), "block": _block(BLOCK, PAY_TO, 10 ** 26, True)},
             {"header": _proof(BLOCK), "block": _block(BLOCK, PAY_TO, 10 ** 26 - 1, True)},
@@ -79,6 +89,87 @@ def build_matrix():
              "required": "100"},
         ],
     }
+
+
+def _declaration_cases():
+    """402 documents both bindings must read the same way.
+
+    Deliberately heavy on the near-misses: a document that is wrong in one
+    field is where two implementations drift, and a document that is wrong in
+    every field is one they both reject for free.
+    """
+    def entry(**over):
+        base = {"scheme": "exact", "network": "nano:mainnet", "asset": "XNO",
+                "amount": "100000000000000000000000000", "payTo": PAY_TO,
+                "maxTimeoutSeconds": 60}
+        base.update(over)
+        return {key: value for key, value in base.items() if value is not _DROP}
+
+    def doc(*entries, **over):
+        body = {"x402Version": 2, "resource": {"url": "https://example.dev/report"},
+                "accepts": list(entries)}
+        body.update(over)
+        return {key: value for key, value in body.items() if value is not _DROP}
+
+    v1 = dict(entry(amount=_DROP), maxAmountRequired="0.0001",
+              resource="https://example.dev/report", description="a rail")
+    return [
+        doc(entry()),
+        doc(entry(amount="0.0001")),
+        doc(entry(amount="0")),
+        doc(entry(amount="9" * 40)),
+        doc(entry(amount=123)),
+        doc(entry(amount=_DROP, maxAmountRequired="0.0001")),
+        doc(entry(maxTimeoutSeconds="60")),
+        doc(entry(maxTimeoutSeconds=0)),
+        doc(entry(maxTimeoutSeconds=True)),
+        doc(entry(maxTimeoutSeconds=60.5)),
+        doc(entry(network="nano-mainnet")),
+        doc(entry(network="nano")),
+        doc(entry(network="nano:testnet")),
+        doc(entry(network="NANO:MAINNET")),
+        doc(entry(network=42)),
+        doc(entry(payTo=PAY_TO[:-1] + "1")),
+        doc(entry(payTo="xrb_" + PAY_TO[5:])),
+        doc(entry(payTo=" " + PAY_TO + " ")),
+        doc(entry(payTo="")),
+        doc(entry(payTo=None)),
+        doc(entry(payTo=42)),
+        doc(entry(asset="USDC")),
+        doc(entry(asset="xno")),
+        doc(entry(scheme="upto")),
+        doc(entry(extra={"decimals": 18})),
+        doc(entry(extra={"decimals": 30})),
+        doc(entry(extra="nano-mainnet")),
+        doc(entry(extra=None)),
+        doc(entry(), resource=_DROP),
+        doc(entry(), resource={"url": ""}),
+        doc(entry(), resource="https://example.dev/report"),
+        doc(),
+        doc(entry(network="nano-mainnet", payTo=BURN), entry()),
+        doc(entry(), entry()),
+        doc({"scheme": "exact", "network": "base", "asset": "USDC",
+             "amount": "10000", "payTo": "0x" + "1" * 40,
+             "maxTimeoutSeconds": 60}, entry()),
+        doc({"scheme": "exact", "network": "base", "asset": "USDC",
+             "maxAmountRequired": "0.01", "payTo": "0x" + "1" * 40}, entry()),
+        doc(None, 5, "x", entry()),
+        {"x402Version": 1, "accepts": [v1]},
+        {"x402Version": 1, "accepts": [dict(v1, mimeType=None)]},
+        {"x402Version": 1, "accepts": [dict(v1, outputSchema="x")]},
+        {"x402Version": 1, "accepts": [dict(v1, description=None)]},
+        {"x402Version": 1, "accepts": [entry()]},
+        {"x402Version": 2.0, "resource": {"url": "u"}, "accepts": [entry()]},
+        {"x402Version": True, "accepts": [entry()]},
+        {"x402Version": 3, "accepts": [entry()]},
+        {"accepts": [entry()]},
+        {"x402Version": 2, "accepts": "nope"},
+        {"x402Version": 2},
+        [], "nope", None, 7, {},
+    ]
+
+
+_DROP = object()
 
 
 def _proof(block_hash):
@@ -99,6 +190,8 @@ def python_result(matrix):
         "amounts": [_amount(value) for value in matrix["amounts"]],
         "prices": [_price(value) for value in matrix["prices"]],
         "challenges": [_challenge_case(shape) for shape in matrix["challenges"]],
+        "networks": [_network.classify(value) for value in matrix["networks"]],
+        "declarations": [_declaration.inspect(value) for value in matrix["declarations"]],
         "proofs": [_proof_case(header) for header in matrix["proofs"]],
         "payments": [_payment_case(case) for case in matrix["payments"]],
     }

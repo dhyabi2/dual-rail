@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 node_modules/
 tests/conformance-matrix.json
+build/
+*.egg-info/

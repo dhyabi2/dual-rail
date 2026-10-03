@@ -4,7 +4,7 @@
   "description": "Add XNO beside USDC/x402, never instead of it: one appended accepts[] entry, and a verifier that proves both rails still work. Middleware only - the CLI (inspect/add/verify) is the Python one.",
   "main": "dual-rail.js",
   "scripts": {
-    "test": "node --test test/dual-rail.test.js"
+    "test": "node --test test/*.test.js"
   },
   "engines": {
     "node": ">=18"
@@ -23,6 +23,8 @@
   "files": [
     "dual-rail.js",
     "challenge.js",
+    "declaration.js",
+    "network.js",
     "money.js",
     "address.js",
     "blake2b.js",

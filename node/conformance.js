@@ -8,7 +8,9 @@
 
 const address = require('./address.js');
 const challenge = require('./challenge.js');
+const declaration = require('./declaration.js');
 const money = require('./money.js');
+const network = require('./network.js');
 const { DualRail, parsePayment, blockHashOf, isOurs } = require('./dual-rail.js');
 const testhost = require('./testhost.js');
 
@@ -82,6 +84,14 @@ async function payments(cases) {
   return out;
 }
 
+function networks(cases) {
+  return cases.map((value) => network.classify(value));
+}
+
+function declarations(cases) {
+  return cases.map((value) => declaration.inspect(value));
+}
+
 function proofs(cases) {
   return cases.map((header) => {
     try {
@@ -101,6 +111,8 @@ async function main() {
     amounts: amounts(matrix.amounts),
     prices: prices(matrix.prices),
     challenges: challenges(matrix.challenges),
+    networks: networks(matrix.networks),
+    declarations: declarations(matrix.declarations),
     proofs: proofs(matrix.proofs),
     payments: await payments(matrix.payments),
   };
