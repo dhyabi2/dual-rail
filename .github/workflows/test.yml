@@ -1,0 +1,69 @@
+name: test
+
+# Until this file existed, a pull request here carried no checks at all, so
+# "the suite passes" was something a reviewer had to take on trust or run by
+# hand. Both bindings, on the versions the package claims to support.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Node is needed, not optional: tests/test_conformance.py FAILS rather
+      # than skips without it, because an unrun conformance suite is exactly
+      # the state in which the two bindings drift apart.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: python -m unittest discover -s tests -v
+      - name: end to end, over real HTTP on 127.0.0.1
+        run: python tests/capture_live_verify.py
+
+  node:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm test
+        working-directory: node
+
+  install:
+    # Every other job runs from a checkout, where `import declaration` resolves
+    # because the file is simply next to the test. This one builds and installs
+    # the package and runs the console script from an unrelated directory, so a
+    # module the CLI needs at runtime cannot pass by being in the working
+    # directory. (Checked while writing this: setuptools' flat-layout discovery
+    # ships every top-level module here whether or not `py-modules` lists it, so
+    # this job is about the installed entry point, not about that list.)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install .
+      - name: the installed console script runs
+        run: |
+          cd "$(mktemp -d)"
+          dual-rail --help > /dev/null
+          printf '%s' '{"x402Version":2,"resource":{"url":"https://e.dev/r"},"accepts":[{"scheme":"exact","network":"nano:mainnet","asset":"XNO","amount":"100000000000000000000000000","payTo":"nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3","maxTimeoutSeconds":60}]}' > m.json
+          dual-rail check m.json
+          dual-rail inspect m.json > /dev/null
