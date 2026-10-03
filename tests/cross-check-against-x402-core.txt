@@ -1,0 +1,56 @@
+Captured 2026-10-03 22:08Z by running, from a clean checkout:
+
+    npm install --no-save @x402/core@2.28.0
+    for s in 1 2 3 7 11 2026; do node tests/cross_check_x402_core.js 20000 $s; done
+
+The question this answers: declaration.py / declaration.js claim their SHAPE
+half rejects exactly what the x402 schema rejects. @x402/core is not a
+dependency of this package and must not become one, so the claim is checked
+here instead of in the suite, by hand, and this file is the result.
+
+Read the ACCEPTED line first. An earlier version of the generator randomised
+every field independently and scored 20000/20000 while the library had
+accepted NONE of the documents - agreement that proves only that both sides
+can say no. These documents start valid and take 0-3 mutations, so about 42%
+come back accepted and the agreement is worth reading. The script refuses a
+run in which nothing was accepted.
+
+cross-check against @x402/core 2.28.0
+  seed 1, 20000 nearly-valid documents
+  the library ACCEPTED 8371 of them (41.9%)
+  shape_problems agreed with it on 20000/20000
+cross-check against @x402/core 2.28.0
+  seed 2, 20000 nearly-valid documents
+  the library ACCEPTED 8426 of them (42.1%)
+  shape_problems agreed with it on 20000/20000
+cross-check against @x402/core 2.28.0
+  seed 3, 20000 nearly-valid documents
+  the library ACCEPTED 8426 of them (42.1%)
+  shape_problems agreed with it on 20000/20000
+cross-check against @x402/core 2.28.0
+  seed 7, 20000 nearly-valid documents
+  the library ACCEPTED 8439 of them (42.2%)
+  shape_problems agreed with it on 20000/20000
+cross-check against @x402/core 2.28.0
+  seed 11, 20000 nearly-valid documents
+  the library ACCEPTED 8370 of them (41.9%)
+  shape_problems agreed with it on 20000/20000
+cross-check against @x402/core 2.28.0
+  seed 2026, 20000 nearly-valid documents
+  the library ACCEPTED 8338 of them (41.7%)
+  shape_problems agreed with it on 20000/20000
+
+120,000 documents, 0 disagreements.
+
+Also checked, and the reason two of the rules above exist at all - both were
+found by this script and neither by hand:
+  * `extra` is z.record(z.unknown()).optional().nullable(), so an entry whose
+    extra is a string takes the whole accepts[] array down with it. The
+    validator did not check extra's type until this run said so.
+  * JSON has one number type, so `"x402Version": 1.0` IS version 1 and zod's
+    z.literal(1) matches it. Python's json gives that back as a float, which
+    an isinstance(value, int) check read as no version at all.
+
+To re-run after an @x402/core release, install that version instead and
+replace this file. A mismatch here is a real finding either way: the schema
+moved, or the validator was wrong.
