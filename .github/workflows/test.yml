@@ -27,6 +27,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      # PyYAML is NOT a dependency of this package and the README's quickstart
+      # must keep working without it, which `HAVE_YAML` in tests/test_dual_rail.py
+      # is there to guarantee. It is installed HERE so the YAML fixture shape is
+      # actually exercised rather than silently dropped on every runner.
+      - run: pip install pyyaml
       - run: python -m unittest discover -s tests -v
       - name: end to end, over real HTTP on 127.0.0.1
         run: python tests/capture_live_verify.py

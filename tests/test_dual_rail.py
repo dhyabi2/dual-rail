@@ -195,10 +195,19 @@ class SpecTests(unittest.TestCase):
 
     def test_patch_is_additive_only(self):
         """11. five fixture shapes, and none yields a patch that removes a
-        semantic element."""
+        semantic element.
+
+        The fifth is YAML and needs PyYAML, which is not a dependency of this
+        package - see HAVE_YAML. The count is asserted rather than assumed, so
+        a run that covers four shapes says four and a machine that has PyYAML
+        cannot quietly cover fewer than five.
+        """
+        blobs = fixtures()
+        self.assertEqual(len(blobs), 5 if HAVE_YAML else 4,
+                         "fixture shapes: %s" % sorted(blobs))
         directory = tempfile.mkdtemp()
         try:
-            for name, blob in fixtures().items():
+            for name, blob in blobs.items():
                 path = os.path.join(directory, name)
                 with open(path, "w", encoding="utf-8") as handle:
                     handle.write(blob)
@@ -459,23 +468,41 @@ def _canonical(text):
     return "%s.%s" % (whole, frac) if frac else whole
 
 
+try:
+    import yaml as _yaml
+except ImportError:                                      # pragma: no cover
+    _yaml = None
+
+#: Whether the YAML fixture shape can be exercised at all. PyYAML is NOT a
+#: dependency of this package and must not become one - the README's quickstart
+#: is `python3 -m unittest discover -s tests` with no install step, and that has
+#: to stay true. The fifth shape needs PyYAML on BOTH sides, to write the
+#: fixture and for `cli._challenge_of` to read it back, so on a bare
+#: interpreter there is nothing to run rather than something silently skipped:
+#: `test_patch_is_additive_only` asserts how many shapes it got, so the count
+#: cannot quietly drop to four where PyYAML IS installed. CI installs it, so the
+#: shape is covered there.
+HAVE_YAML = _yaml is not None
+
+
 def fixtures():
     two = testhost.challenge()
     one = testhost.challenge(testhost.USDC_ENTRIES[:1])
     three = testhost.challenge(testhost.USDC_ENTRIES + [dict(
         testhost.USDC_ENTRIES[0], network="polygon", maxAmountRequired="0.02")])
-    return {
+    shapes = {
         "two-entry.json": json.dumps(two, indent=2),
         "one-entry.json": json.dumps(one, indent=2),
         "three-entry.json": json.dumps(three, indent=2),
         "minified.json": json.dumps(two, separators=(",", ":")),
-        "manifest.yaml": _to_yaml(two),
     }
+    if HAVE_YAML:
+        shapes["manifest.yaml"] = _to_yaml(two)
+    return shapes
 
 
 def _to_yaml(document):
-    import yaml
-    return yaml.safe_dump(document, sort_keys=False)
+    return _yaml.safe_dump(document, sort_keys=False)
 
 
 def load_manifest(path):
