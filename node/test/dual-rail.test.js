@@ -271,3 +271,43 @@ test('the hardest decimals round trip in BigInt', () => {
   }
   assert.equal(money.xnoToRaw('0.1') + money.xnoToRaw('0.2'), money.xnoToRaw('0.3'));
 });
+
+// `maxAmountRequired` must be the ATOMIC amount - raw - or no x402 Nano client
+// can pay the entry this adapter appends. It carried the configured decimal XNO
+// string verbatim ('0.0001'); every x402 client reads the field as an integer
+// count of the asset's atomic unit, which is what `extra.decimals: 30` declares
+// it to be, so a patched 402 was unpayable. Mirrors AdvertisedAmountIsPayable in
+// tests/test_dual_rail.py; the conformance suite asserts the two agree.
+function nanoEntryFor(amountXno) {
+  const patched = challenge.appendNano(
+    { accepts: [{ scheme: 'exact', network: 'base', asset: 'USDC',
+                  maxAmountRequired: '10000', payTo: '0xabc',
+                  resource: 'https://example.dev/report' }] },
+    PAY_TO, amountXno);
+  return patched.accepts[patched.accepts.length - 1];
+}
+
+test('the advertised amount is an integer of raw', () => {
+  const field = nanoEntryFor('0.0001').maxAmountRequired;
+  assert.match(field, /^[0-9]+$/, `maxAmountRequired must be integer raw, got ${field}`);
+  assert.equal(BigInt(field), money.xnoToRaw('0.0001'));
+});
+
+test('a client reading maxAmountRequired the x402 way gets the configured price', () => {
+  // Exactly what feeless402's offer_amount_raw does: parse the field as an integer.
+  assert.equal(BigInt(nanoEntryFor('0.0001').maxAmountRequired), 10n ** 26n);
+});
+
+test('the decimal figure is still there for a human', () => {
+  assert.equal(nanoEntryFor('0.0001').maxAmountRequiredFormatted, '0.0001 XNO');
+});
+
+test('the hardest prices survive the wire', () => {
+  for (const amount of ['0.000001', '0.1', '0.3', '100', '99.999999',
+                        '0.' + '0'.repeat(29) + '1']) {
+    const field = nanoEntryFor(amount).maxAmountRequired;
+    assert.match(field, /^[0-9]+$/, amount);
+    assert.equal(BigInt(field), money.xnoToRaw(amount), amount);
+    assert.equal(money.rawToXno(BigInt(field)), amount, amount);
+  }
+});

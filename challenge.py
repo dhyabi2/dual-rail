@@ -14,6 +14,8 @@ through it, including the CLI's `--diff`.
 
 import copy
 
+import money
+
 NETWORK = "nano:mainnet"
 ASSET = "XNO"
 SCHEME = "exact"
@@ -28,12 +30,28 @@ class NotAdditive(AssertionError):
 
 
 def nano_entry(pay_to: str, amount_xno: str, resource) -> dict:
-    """The single element this adapter appends. Nothing else is ever written."""
+    """The single element this adapter appends. Nothing else is ever written.
+
+    `maxAmountRequired` is in the asset's ATOMIC unit - raw, of which there are
+    10**30 to the XNO, which is why `extra.decimals` says 30. It used to carry
+    the configured decimal XNO string verbatim ("0.0001"), and every x402 Nano
+    client reads the field as an integer count of raw: feeless402's
+    `offer_amount_raw` is `int(offer["maxAmountRequired"])`, so a patched 402
+    raised `ValueError: invalid literal for int() with base 10: '0.0001'` and
+    the agent could not pay at all. The decimal figure is kept beside it in
+    `maxAmountRequiredFormatted`, which is where that client already looks for
+    something human-readable, so nothing is lost from the operator's view.
+
+    The configured `amount_xno` is unchanged, and so is everything this adapter
+    accepts: `Adapter.amount_raw` is still `money.check_price(amount_xno)`, so
+    the amount a payment is checked against is exactly what it always was.
+    """
     return {
         "scheme": SCHEME,
         "network": NETWORK,
         "asset": ASSET,
-        "maxAmountRequired": str(amount_xno),
+        "maxAmountRequired": str(money.xno_to_raw(amount_xno)),
+        "maxAmountRequiredFormatted": "%s XNO" % amount_xno,
         "payTo": pay_to,
         "resource": resource,
         "description": DESCRIPTION,

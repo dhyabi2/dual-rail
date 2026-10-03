@@ -3,6 +3,8 @@
 // Character for character the same contract as challenge.py; the conformance
 // suite asserts the two produce identical JSON.
 
+const money = require('./money');
+
 const NETWORK = 'nano:mainnet';
 const ASSET = 'XNO';
 const SCHEME = 'exact';
@@ -18,12 +20,20 @@ class NotAdditive extends Error {
   }
 }
 
+// `maxAmountRequired` is in the asset's ATOMIC unit - raw, 10n**30n to the XNO,
+// which is what `extra.decimals` says. It used to carry the configured decimal
+// XNO string verbatim ('0.0001'), and every x402 Nano client reads the field as
+// an integer count of raw, so a patched 402 was unpayable. The decimal figure
+// stays beside it in `maxAmountRequiredFormatted`. See challenge.py for the
+// measurement; the Python and Node entries must stay byte-identical (the
+// conformance suite asserts it).
 function nanoEntry(payTo, amountXno, resource) {
   return {
     scheme: SCHEME,
     network: NETWORK,
     asset: ASSET,
-    maxAmountRequired: String(amountXno),
+    maxAmountRequired: String(money.xnoToRaw(amountXno)),
+    maxAmountRequiredFormatted: `${amountXno} XNO`,
     payTo,
     resource: resource === undefined ? null : resource,
     description: DESCRIPTION,

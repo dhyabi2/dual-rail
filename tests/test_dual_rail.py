@@ -424,6 +424,65 @@ class ErrorTable(unittest.TestCase):
 
 # ---------------------------------------------------------------- the money
 
+class AdvertisedAmountIsPayable(unittest.TestCase):
+    """`maxAmountRequired` must be the ATOMIC amount - raw - or no x402 Nano
+    client can pay the entry this adapter appends.
+
+    It carried the configured decimal XNO string verbatim ("0.0001"). Every
+    x402 client reads that field as an integer count of the asset's atomic
+    unit, which is what `extra.decimals: 30` declares it to be; the reference
+    Nano client, feeless402, reads it as literally `int(offer[field])`. So a
+    402 this adapter had patched raised
+
+        ValueError: invalid literal for int() with base 10: '0.0001'
+
+    inside the payer, and the agent could not buy at all - the one thing this
+    adapter exists to make possible. The seller was never at risk (the adapter
+    checks a payment against `money.check_price(amount_xno)`, which never
+    changed, so a short payment was still refused as underpaid); the loss was
+    the sale.
+    """
+
+    def entry(self, amount=AMOUNT):
+        patched = _challenge.append_nano(
+            {"accepts": [{"scheme": "exact", "network": "base", "asset": "USDC",
+                          "maxAmountRequired": "10000", "payTo": "0xabc",
+                          "resource": RESOURCE}]},
+            PAY_TO, amount)
+        return patched["accepts"][-1]
+
+    def test_the_advertised_amount_is_an_integer_of_raw(self):
+        field = self.entry()["maxAmountRequired"]
+        self.assertTrue(field.isdigit(),
+                        "maxAmountRequired must be an integer string of raw, got %r" % field)
+        self.assertEqual(int(field), AMOUNT_RAW)
+
+    def test_a_client_reading_it_the_x402_way_gets_the_configured_price(self):
+        """Exactly what feeless402's `offer_amount_raw` does: int(the field)."""
+        entry = self.entry()
+        self.assertEqual(int(entry["maxAmountRequired"]), money.xno_to_raw(AMOUNT))
+
+    def test_what_the_adapter_accepts_is_what_it_advertises(self):
+        """The advertised figure and the figure a payment is checked against
+        must be the same number, or the rail either overcharges or undersells."""
+        a = build(node=fakenode.FakeNode())
+        self.assertEqual(int(self.entry()["maxAmountRequired"]), a.amount_raw)
+
+    def test_the_decimal_figure_is_still_there_for_a_human(self):
+        self.assertEqual(self.entry()["maxAmountRequiredFormatted"], "%s XNO" % AMOUNT)
+
+    def test_the_hardest_prices_survive_the_wire(self):
+        """A price a float would round must come back exactly, through the
+        string that actually goes on the wire."""
+        for amount in ("0.000001", "0.1", "0.3", "100", "99.999999",
+                       "0.000000000000000000000000000003"):
+            field = self.entry(amount)["maxAmountRequired"]
+            self.assertTrue(field.isdigit(), amount)
+            self.assertEqual(int(field), money.xno_to_raw(amount), amount)
+            self.assertEqual(money.raw_to_xno(int(field)).rstrip("."),
+                             amount.rstrip(".") if "." in amount else amount, amount)
+
+
 class Money(unittest.TestCase):
 
     def test_one_raw_below_is_below(self):
