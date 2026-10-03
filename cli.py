@@ -9,6 +9,11 @@
         Emit the entry to append, or a unified diff. Exits 3 rather than emit a
         patch that removes or modifies anything.
 
+    dual-rail check <manifest-url|file>
+        Say whether an x402 client would pay the Nano entry in this 402, and
+        name every field that would sink it. Read-only. Exits 1 if nothing in
+        it is payable, so it can gate a deploy.
+
     dual-rail verify <base-url> [--payment <block hash>] [--json]
         The deliverable. Exit 0 only if every check passes.
 
@@ -30,6 +35,7 @@ import urllib.request
 
 import adapter as _adapter
 import challenge as _challenge
+import declaration
 import money
 import nanoaddr
 
@@ -59,27 +65,35 @@ class Unreadable(ValueError):
     pass
 
 
-def _challenge_of(text, path=""):
+def _document_of(text, path=""):
     """Parse a manifest. JSON always; YAML only if PyYAML happens to be there.
 
     This package has no dependencies and is not about to acquire one for a
     file format. A YAML manifest with no PyYAML installed is refused with a
     message that says what to do, which is better than a half-parse.
+
+    Returns whatever the document says, shape unchecked - `check` has to be
+    able to report a missing or malformed accepts[] rather than refuse to
+    read the file at all.
     """
     stripped = text.lstrip()
     looks_json = stripped.startswith("{") or stripped.startswith("[")
     if looks_json or not path.endswith((".yaml", ".yml")):
-        body = json.loads(text)
-    else:
-        try:
-            import yaml
-        except ImportError:
-            raise Unreadable(
-                "%s looks like YAML and PyYAML is not installed. Convert it to JSON, "
-                "or pip install pyyaml - this package will not take the dependency "
-                "on your behalf." % path
-            ) from None
-        body = yaml.safe_load(text)
+        return json.loads(text)
+    try:
+        import yaml
+    except ImportError:
+        raise Unreadable(
+            "%s looks like YAML and PyYAML is not installed. Convert it to JSON, "
+            "or pip install pyyaml - this package will not take the dependency "
+            "on your behalf." % path
+        ) from None
+    return yaml.safe_load(text)
+
+
+def _challenge_of(text, path=""):
+    """`_document_of`, and it must be a 402 challenge with an accepts[] array."""
+    body = _document_of(text, path)
     if not isinstance(body, dict) or not isinstance(body.get("accepts"), list):
         raise Unreadable("no accepts[] array in this document")
     return body
@@ -190,6 +204,52 @@ def _removals_are_only_reflow(removals) -> bool:
         if line[1:].strip() not in ("}", "},", "]", "],"):
             return False
     return True
+
+
+# ------------------------------------------------------------------- check
+
+def cmd_check(args) -> int:
+    """The declaration validator, pointed at a manifest.
+
+    `inspect` reports what is in an accepts[] array; this reports whether a
+    client would act on it. A seller whose entry is silently skipped has no
+    other way to find out: the x402 libraries drop an entry that fails their
+    schema without saying so, and from the seller's side that is
+    indistinguishable from nobody wanting to pay in XNO.
+    """
+    try:
+        _, _, text = _fetch(args.target)
+        body = _document_of(text, args.target)
+    except Exception as exc:
+        print(json.dumps({"error": "unreadable", "message": str(exc)}, indent=2))
+        return EXIT_USAGE
+
+    report = declaration.inspect(body)
+    report["target"] = args.target
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return EXIT_OK if report["payable"] else EXIT_FAIL
+
+    print("\ndual-rail check %s\n" % args.target)
+    print("x402 version declared: %s" % (report["x402_version"] or "none"))
+    print("accepts[] entries:     %d" % report["entries"])
+    print("entries naming Nano:   %d\n" % len(report["nano_entries"]))
+    for issue in report["problems"]:
+        print("[document] %-34s %s" % (issue["field"] or "-", issue["message"]))
+    for entry in report["nano_entries"]:
+        print("\naccepts[%d]  network %s%s" % (
+            entry["index"], json.dumps(entry["network_as_given"]),
+            "" if entry["canonical_network"] else "  (not read as mainnet)"))
+        for version, check in sorted(entry["checks"].items()):
+            print("  x402 v%s: %s" % (version, "payable" if check["payable"]
+                                      else "%d problem(s)" % len(check["problems"])))
+            for issue in check["problems"]:
+                print("    [%s] %s" % (issue["code"], issue["message"]))
+    print("\ncheck: %s\n" % ("payable - an x402 client of the declared version would "
+                             "pay this Nano entry" if report["payable"]
+                             else "NOT payable as it stands"))
+    return EXIT_OK if report["payable"] else EXIT_FAIL
 
 
 # ------------------------------------------------------------------- verify
@@ -318,6 +378,11 @@ def build_parser():
     add.add_argument("--out")
     add.add_argument("--diff", action="store_true")
     add.set_defaults(fn=cmd_add)
+
+    check = sub.add_parser("check", help="would an x402 client pay this Nano entry?")
+    check.add_argument("target")
+    check.add_argument("--json", action="store_true")
+    check.set_defaults(fn=cmd_check)
 
     verify = sub.add_parser("verify", help="prove both rails work against a live endpoint")
     verify.add_argument("base_url")

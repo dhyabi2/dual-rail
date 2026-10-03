@@ -8,8 +8,16 @@ conformance suite asserts the two agree on values chosen to break a
 float.
 """
 
+import re
+
 RAW_PER_XNO = 10 ** 30
 DECIMALS = 30
+
+#: An amount is ASCII digits with at most one dot - the same grammar the Node
+#: binding tests and the same one `@x402nano/typescript-common` declares for an
+#: integer amount (`/^\d+$/`, where JavaScript's \d is ASCII). Written out
+#: rather than `\d`, which in Python's `re` also matches Unicode digits.
+_DECIMAL = re.compile(r"^[0-9]*(\.[0-9]*)?$")
 
 #: The spec's price band. Below the floor is dust; above the ceiling is a
 #: price nobody meant to type.
@@ -37,12 +45,16 @@ def xno_to_raw(amount) -> int:
         raise AmountError("invalid_amount", "amount is empty")
     if text.startswith("-"):
         raise AmountError("invalid_amount", "amount must not be negative")
-    if text.count(".") > 1:
+    if not _DECIMAL.match(text) or text == ".":
+        # `str.isdigit()` was here and is true for every Unicode digit, which
+        # is not what any client reads the amount back with. The Node binding's
+        # /^\d+$/ is ASCII-only, so "٣" was 3 XNO in Python and refused in
+        # Node, and "²" - isdigit() true, int() ValueError - crashed out of
+        # this module past every `except AmountError` in the package. The
+        # schema that does the real rejecting is ASCII, so this is too.
         raise AmountError("invalid_amount", "amount is not a decimal number: %r" % amount)
     whole, _, frac = text.partition(".")
     whole = whole or "0"
-    if not whole.isdigit() or (frac and not frac.isdigit()):
-        raise AmountError("invalid_amount", "amount is not a decimal number: %r" % amount)
     if len(frac) > DECIMALS:
         raise AmountError("invalid_amount",
                           "Nano has %d decimal places; %d were given" % (DECIMALS, len(frac)))

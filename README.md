@@ -20,8 +20,8 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 34 tests, includes the Python/Node conformance run
-(cd node && node --test test/dual-rail.test.js) # 22 tests
+python3 -m unittest discover -s tests          # 74 tests, includes the Python/Node conformance run
+(cd node && npm test)                           # 44 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
 
@@ -148,6 +148,7 @@ your endpoint rather than into either runtime.
 
 ```
 dual-rail inspect <manifest-url|file>       # read-only; prints the current rails
+dual-rail check   <manifest-url|file> [--json]   # read-only; would a client PAY the Nano entry?
 dual-rail add --manifest <url|file> --pay-to nano_… --amount 0.0001 [--out p.json|--diff]
 dual-rail verify <base-url> [--payment <block hash>] [--json]
 ```
@@ -156,6 +157,82 @@ dual-rail verify <base-url> [--payment <block hash>] [--json]
 did not author — including on a YAML manifest, which cannot be re-rendered
 without rewriting lines, and where it tells you to use `--out` instead. Run on
 an already-patched manifest it exits 0 with `already_present` and emits nothing.
+
+## Would a client actually pay your Nano entry?
+
+`inspect` says what is in your `accepts[]` array. `check` says whether anything
+would act on it — and it is a different question, because an x402 client that
+cannot parse your Nano entry does not reject it with a reason. The entry fails a
+schema check inside the client library and is **dropped before any payment is
+attempted**. From your side that is indistinguishable from nobody wanting to pay
+in XNO.
+
+```
+$ python3 cli.py check https://your-service.example/.well-known/x402
+
+accepts[1]  network "nano-mainnet"
+  x402 v2: 3 problem(s)
+    [network_not_caip2] "nano-mainnet" is accepted by x402 v1 but refused by v2,
+      whose NetworkSchemaV2 requires a colon (@x402/core 2.28.0). Emit "nano:mainnet"
+    [amount_field_is_other_version_name] this entry carries maxAmountRequired,
+      x402 v1's name for the price…
+    [pay_to_invalid] payTo is not a payable Nano account (bad_checksum)…
+
+check: NOT payable as it stands
+```
+
+It exits **1** when nothing in the document is payable, so it can gate a deploy.
+
+The rules come in two halves, and the split is the point. `shape_problems` is
+**only** what the x402 schema itself rejects, read off `@x402/core` 2.28.0's own
+`PaymentRequirementsV1Schema` and `PaymentRequirementsV2Schema` — the renamed
+amount field, the CAIP-2 network rule that v2 added and v1 did not have,
+`maxTimeoutSeconds` being a `number` so that `"60"` is refused, `extra` having
+to be an object or null. That half is checked for **equivalence** against the
+real installed package by `tests/cross_check_x402_core.js`, over 120,000
+nearly-valid documents of which the library accepts about 42%; the captured run
+is in `tests/cross-check-against-x402-core.txt`. It is not part of the suite
+because this package has no dependencies and is not acquiring one.
+
+`nano_problems` is what no generic x402 conformance tool can check, because it
+needs the chain:
+
+- a `payTo` that is well-formed and **fails its checksum**. x402 asks only for a
+  non-empty string, so the client accepts it and the money sent there is
+  unspendable.
+- an amount that is not a whole number of raw. `@x402nano/typescript-common`
+  declares an integer amount `/^\d+$/`, so `"0.0001"` is not a payable v2
+  amount however right it looks.
+- an amount above 2\*\*128-1 raw, which no Nano block's balance field can hold.
+- a network identifier that means Nano but is not the canonical spelling.
+
+And because a client parses the whole 402 or none of it, `check` reports a
+**sibling** entry that sinks the document your entry is in — a USDC entry
+carrying `"network": "base"` in a document that says `x402Version: 2` fails
+`NetworkSchemaV2`, and the array your Nano entry sits in is thrown out with it.
+
+## Network identifiers: there is more than one
+
+`nano:mainnet` is the canonical spelling and the only one x402 v2 accepts.
+`nano-mainnet` is also in the wild: legal under v1, whose `NetworkSchemaV1` is
+any non-empty string, and refused by v2. `network.py` / `node/network.js` read
+both as mainnet, emit the canonical one, and tell you which you were given.
+
+A bare `nano` or `xno` is **refused**, not assumed: it names the family without
+naming the network, and Nano's test networks use the same `nano_` address
+prefix, so reading it as mainnet would be a guess about where money goes. It
+comes back as `network_unspecified`, and `nano:testnet` comes back as
+`not_mainnet` — a different answer from "this is not Nano", because the two want
+different fixes.
+
+This matters to the adapter and not only to the validator. `find_nano` used to
+compare against the literal `nano:mainnet`, so a seller who **already** accepted
+XNO and spelled it `nano-mainnet` looked like a seller with no Nano entry, and
+`add` appended a second one. The array then carried two Nano prices and two
+payout addresses, and which one got paid depended on the payer's protocol
+version: a v1 client takes the first entry it can pay, a v2 client refuses
+`nano-mainnet` outright and takes the other. `add` is now a no-op there, and
+`check` reports such an array as `duplicate_nano_entries` if one reaches it.
 
 ## Money
 
@@ -168,10 +245,10 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 34 tests — OK
+Ran 74 tests — OK
 
-$ cd node && node --test test/dual-rail.test.js
-# pass 22
+$ cd node && npm test
+# pass 44
 
 $ python3 -m unittest tests.test_conformance
 ```
@@ -179,8 +256,9 @@ $ python3 -m unittest tests.test_conformance
 The last one is the interesting one. The two bindings have to behave
 **identically**, and a promise that they do is worth nothing without something
 that runs them side by side: `tests/test_conformance.py` drives one shared
-matrix — addresses, amounts, price bands, challenge shapes, payment proofs,
-settlement verdicts — through both and asserts deep equality, case by case. It
+matrix — addresses, amounts, price bands, challenge shapes, network
+identifiers, whole 402 declarations, payment proofs, settlement verdicts —
+through both and asserts deep equality, case by case, **messages included**. It
 fails rather than skips if `node` is missing, because an unrun conformance suite
 is exactly the state in which two implementations drift apart.
 

@@ -15,5 +15,5 @@ keywords = ["x402", "nano", "xno", "payments", "wsgi", "middleware", "agent"]
 dual-rail = "cli:main"
 
 [tool.setuptools]
-py-modules = ["adapter", "challenge", "verify", "money", "nanoaddr", "nanonode",
-              "cli", "fakenode", "testhost"]
+py-modules = ["adapter", "challenge", "declaration", "network", "verify", "money",
+              "nanoaddr", "nanonode", "cli", "fakenode", "testhost"]

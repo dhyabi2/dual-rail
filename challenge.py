@@ -15,6 +15,7 @@ through it, including the CLI's `--diff`.
 import copy
 
 import money
+import network as _network
 
 NETWORK = "nano:mainnet"
 ASSET = "XNO"
@@ -92,9 +93,19 @@ def nano_entry(pay_to: str, amount_xno: str, resource) -> dict:
 
 
 def find_nano(accepts) -> int:
-    """Index of an existing Nano entry, or -1."""
+    """Index of an existing Nano mainnet entry, or -1.
+
+    Matches every spelling of Nano mainnet, not just the one we emit.
+    Comparing against NETWORK alone missed a seller who already accepted XNO
+    and spelled the network `nano-mainnet` - x402 v1's colon-free form - so
+    `append_nano` appended a SECOND Nano entry beside theirs. The array then
+    carried two Nano prices and two payout addresses, and which one got paid
+    depended on the payer's protocol version: a v1 client takes the first
+    entry it can pay, a v2 client refuses `nano-mainnet` outright (its
+    NetworkSchemaV2 requires a colon) and takes ours. See network.py.
+    """
     for index, entry in enumerate(accepts or []):
-        if isinstance(entry, dict) and entry.get("network") == NETWORK:
+        if isinstance(entry, dict) and _network.is_nano_mainnet(entry.get("network")):
             return index
     return -1
 
