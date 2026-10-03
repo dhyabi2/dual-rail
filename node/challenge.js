@@ -3,6 +3,8 @@
 // Character for character the same contract as challenge.py; the conformance
 // suite asserts the two produce identical JSON.
 
+const network = require('./network.js');
+
 const NETWORK = 'nano:mainnet';
 const ASSET = 'XNO';
 const SCHEME = 'exact';
@@ -31,9 +33,20 @@ function nanoEntry(payTo, amountXno, resource) {
   };
 }
 
+// Index of an existing Nano mainnet entry, or -1.
+//
+// Matches every spelling of Nano mainnet, not just the one we emit. Comparing
+// against NETWORK alone missed a seller who already accepted XNO and spelled
+// the network `nano-mainnet` - x402 v1's colon-free form - so appendNano
+// appended a SECOND Nano entry beside theirs. The array then carried two Nano
+// prices and two payout addresses, and which one got paid depended on the
+// payer's protocol version: a v1 client takes the first entry it can pay, a v2
+// client refuses `nano-mainnet` outright (its NetworkSchemaV2 requires a
+// colon) and takes ours. See network.js.
 function findNano(accepts) {
   if (!Array.isArray(accepts)) return -1;
-  return accepts.findIndex((e) => e && typeof e === 'object' && e.network === NETWORK);
+  return accepts.findIndex(
+    (e) => e && typeof e === 'object' && network.isNanoMainnet(e.network));
 }
 
 function resourceOf(accepts) {
