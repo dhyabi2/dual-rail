@@ -14,6 +14,7 @@ through it, including the CLI's `--diff`.
 
 import copy
 
+import money
 import network as _network
 
 NETWORK = "nano:mainnet"
@@ -21,6 +22,13 @@ ASSET = "XNO"
 SCHEME = "exact"
 ADAPTER_ID = "dual-rail/1"
 DECIMALS = 30
+# x402 requires a payment window on every accepts[] entry, in BOTH protocol
+# versions (see `nano_entry`). It is how long the server will still take a
+# payment built against this quote. A Nano send confirms in about a second, so
+# the window is there for the client's own round trip, not for the ledger; 60s
+# is the value the x402 ecosystem uses, and it is not a price, so it is a
+# constant rather than one more thing an operator can get wrong.
+MAX_TIMEOUT_SECONDS = 60
 
 DESCRIPTION = "Feeless native-coin settlement. Optional - the entries above are unchanged."
 
@@ -30,15 +38,56 @@ class NotAdditive(AssertionError):
 
 
 def nano_entry(pay_to: str, amount_xno: str, resource) -> dict:
-    """The single element this adapter appends. Nothing else is ever written."""
+    """The single element this adapter appends. Nothing else is ever written.
+
+    The amount is in the asset's ATOMIC unit - raw, of which there are 10**30 to
+    the XNO, which is why `extra.decimals` says 30. It used to carry the
+    configured decimal XNO string verbatim ("0.0001"), and every x402 Nano client
+    reads the field as an integer count of raw: feeless402 0.2.12's
+    `nano_pay.x402.offer_amount_raw` is `int(offer[field])` over
+    `("amount", "maxAmountRequired", "max_amount_required")` in that order, so a
+    patched 402 raised `ValueError: invalid literal for int() with base 10:
+    '0.0001'` and the agent could not pay at all. The decimal figure is kept beside it in `maxAmountRequiredFormatted`,
+    which is where that client already looks for something human-readable, so
+    nothing is lost from the operator's view.
+
+    The amount is advertised under BOTH names, because x402 renamed the field
+    between protocol versions and this entry is appended to somebody else's
+    challenge, whose version we do not choose:
+
+      * `maxAmountRequired` is the x402 **v1** name, and v1 requires it;
+      * `amount` is the x402 **v2** name, and v2 requires it.
+
+    Measured against the official packages - `@x402/core` 2.28.0's
+    `PaymentRequirementsV1Schema` and `PaymentRequirementsV2Schema`, and
+    `@x402nano/exact` 0.3.0, whose `parsePrice("0.0001", "nano:mainnet")` returns
+    exactly `{"amount": "100000000000000000000000000"}`, the same integer this
+    emits - carrying both names is accepted by v1, by v2 and by the
+    `PaymentRequirements` union, because each version's schema strips the other
+    version's field rather than rejecting it. Carrying only one is rejected
+    outright by the other version, so no single name is correct for an entry we
+    append blind. `tests/test_dual_rail.py` pins both required sets.
+
+    `maxTimeoutSeconds` is required by v1 AND v2, so without it this entry was
+    never a valid `PaymentRequirements` object under either version - which is
+    why it is here even though no Nano client was reading it.
+
+    The configured `amount_xno` is unchanged, and so is everything this adapter
+    accepts: `Adapter.amount_raw` is still `money.check_price(amount_xno)`, so
+    the amount a payment is checked against is exactly what it always was.
+    """
+    raw = str(money.xno_to_raw(amount_xno))
     return {
         "scheme": SCHEME,
         "network": NETWORK,
         "asset": ASSET,
-        "maxAmountRequired": str(amount_xno),
+        "amount": raw,
+        "maxAmountRequired": raw,
+        "maxAmountRequiredFormatted": "%s XNO" % amount_xno,
         "payTo": pay_to,
         "resource": resource,
         "description": DESCRIPTION,
+        "maxTimeoutSeconds": MAX_TIMEOUT_SECONDS,
         "extra": {"decimals": DECIMALS, "adapter": ADAPTER_ID},
     }
 
