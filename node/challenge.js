@@ -10,6 +10,10 @@ const ASSET = 'XNO';
 const SCHEME = 'exact';
 const ADAPTER_ID = 'dual-rail/1';
 const DECIMALS = 30;
+// x402 requires a payment window on every accepts[] entry, in BOTH protocol
+// versions (see `nanoEntry`). 60s is the ecosystem's value; it is not a price,
+// so it is a constant rather than one more thing an operator can get wrong.
+const MAX_TIMEOUT_SECONDS = 60;
 const DESCRIPTION =
   'Feeless native-coin settlement. Optional - the entries above are unchanged.';
 
@@ -20,23 +24,33 @@ class NotAdditive extends Error {
   }
 }
 
-// `maxAmountRequired` is in the asset's ATOMIC unit - raw, 10n**30n to the XNO,
-// which is what `extra.decimals` says. It used to carry the configured decimal
-// XNO string verbatim ('0.0001'), and every x402 Nano client reads the field as
-// an integer count of raw, so a patched 402 was unpayable. The decimal figure
-// stays beside it in `maxAmountRequiredFormatted`. See challenge.py for the
-// measurement; the Python and Node entries must stay byte-identical (the
+// The amount is in the asset's ATOMIC unit - raw, 10n**30n to the XNO, which is
+// what `extra.decimals` says. It used to carry the configured decimal XNO string
+// verbatim ('0.0001'), and every x402 Nano client reads the field as an integer
+// count of raw, so a patched 402 was unpayable. The decimal figure stays beside
+// it in `maxAmountRequiredFormatted`, which is where feeless402's `compare_rails`
+// looks for something human-readable.
+//
+// It goes out under BOTH names because x402 renamed the field between protocol
+// versions and we append to somebody else's challenge: `maxAmountRequired` is
+// required by v1, `amount` is required by v2, and each version's schema strips
+// the other's field rather than rejecting it. `maxTimeoutSeconds` is required by
+// both. See challenge.py for the measurement against `@x402/core` 2.28.0 and
+// `@x402nano/exact` 0.3.0; the Python and Node entries must stay identical (the
 // conformance suite asserts it).
 function nanoEntry(payTo, amountXno, resource) {
+  const raw = String(money.xnoToRaw(amountXno));
   return {
     scheme: SCHEME,
     network: NETWORK,
     asset: ASSET,
-    maxAmountRequired: String(money.xnoToRaw(amountXno)),
+    amount: raw,
+    maxAmountRequired: raw,
     maxAmountRequiredFormatted: `${amountXno} XNO`,
     payTo,
     resource: resource === undefined ? null : resource,
     description: DESCRIPTION,
+    maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
     extra: { decimals: DECIMALS, adapter: ADAPTER_ID },
   };
 }
@@ -83,4 +97,5 @@ function appendNano(challenge, payTo, amountXno) {
 }
 
 module.exports = { NETWORK, ASSET, SCHEME, ADAPTER_ID, DECIMALS, DESCRIPTION,
-                   NotAdditive, nanoEntry, findNano, resourceOf, assertAdditive, appendNano };
+                   MAX_TIMEOUT_SECONDS, NotAdditive, nanoEntry, findNano, resourceOf,
+                   assertAdditive, appendNano };
