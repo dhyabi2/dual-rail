@@ -20,8 +20,8 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 74 tests, includes the Python/Node conformance run
-(cd node && npm test)                           # 44 tests
+python3 -m unittest discover -s tests          # 96 tests, includes the Python/Node conformance run
+(cd node && npm test)                           # 55 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
 
@@ -160,6 +160,14 @@ an already-patched manifest it exits 0 with `already_present` and emits nothing.
 
 ## Would a client actually pay your Nano entry?
 
+`inspect` reads the price under whichever name your document uses — x402
+renamed it from `maxAmountRequired` (v1) to `amount` (v2), and it reports which
+one it found in `amount_field`. It also reads a **multi-resource** manifest,
+where `accepts[]` sits under each `resources[]` item rather than at the top
+level, and reports each resource separately. `add` deliberately refuses that
+shape: which of your resources gets the payout address is your call, not this
+tool's, so point it at the one resource's own 402.
+
 `inspect` says what is in your `accepts[]` array. `check` says whether anything
 would act on it — and it is a different question, because an x402 client that
 cannot parse your Nano entry does not reject it with a reason. The entry fails a
@@ -245,10 +253,10 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 74 tests — OK
+Ran 96 tests — OK
 
 $ cd node && npm test
-# pass 44
+# pass 55
 
 $ python3 -m unittest tests.test_conformance
 ```

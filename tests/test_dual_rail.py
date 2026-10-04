@@ -704,5 +704,223 @@ class live_server:
         return False
 
 
+
+class ReadsEveryVersionsAmountField(unittest.TestCase):
+    """x402 renamed the price field between v1 (`maxAmountRequired`) and v2
+    (`amount`), and `cli.py` read only the v1 name (dhyabi2/dual-rail#1).
+
+    Every CLI test in this file passed over that defect, because
+    `testhost.USDC_ENTRIES` declares `x402Version: 2` and still prices under
+    the v1 name - the one field the code read. A fixture that cannot tell the
+    two apart cannot fail on the difference, so these tests build a genuinely
+    v2-shaped host and pin that it carries no v1 price field at all.
+    """
+
+    #: The host's own entries, priced the way a real x402 v2 seller prices
+    #: them. Derived from the host rather than written out, so a change there
+    #: cannot leave this fixture asserting against a shape nobody serves.
+    @staticmethod
+    def v2_entries():
+        entries = []
+        for entry in testhost.USDC_ENTRIES:
+            moved = {k: v for k, v in entry.items() if k != "maxAmountRequired"}
+            moved["amount"] = entry["maxAmountRequired"]
+            entries.append(moved)
+        return entries
+
+    def test_the_v2_fixture_can_tell_the_difference(self):
+        """The control. Without this the tests below could pass on a fixture
+        that still carries the v1 field, which is how the defect survived."""
+        for entry in self.v2_entries():
+            self.assertNotIn("maxAmountRequired", entry)
+            self.assertIn("amount", entry)
+        self.assertEqual(testhost.challenge()["x402Version"], 2)
+        self.assertTrue(all("maxAmountRequired" in e for e in testhost.USDC_ENTRIES),
+                        "the stock host is the v1-named fixture these tests "
+                        "exist to contrast with; if it moved, revisit them")
+
+    def test_amount_of_reads_the_fields_in_the_payers_order(self):
+        """feeless402 0.2.12's `offer_amount_raw` tries `amount`, then
+        `maxAmountRequired`, then `max_amount_required`. What a payer reads is
+        what `inspect` must report, so the order is theirs, not a schema's."""
+        self.assertEqual(cli._amount_of({"amount": "7"}), ("7", "amount"))
+        self.assertEqual(cli._amount_of({"maxAmountRequired": "7"}),
+                         ("7", "maxAmountRequired"))
+        self.assertEqual(cli._amount_of({"max_amount_required": "7"}),
+                         ("7", "max_amount_required"))
+        self.assertEqual(cli._amount_of({"amount": "7", "maxAmountRequired": "9"}),
+                         ("7", "amount"), "a payer reads `amount` first")
+        self.assertEqual(cli._amount_of({}), (None, None))
+        self.assertEqual(cli._amount_of(None), (None, None))
+        self.assertEqual(cli._amount_of({"amount": None, "maxAmountRequired": "9"}),
+                         ("9", "maxAmountRequired"),
+                         "an explicit null is not a price")
+
+    def test_inspect_reports_a_v2_entrys_price(self):
+        """Before the fix every rail of a v2 manifest read
+        `maxAmountRequired: null` - an agent asking what the seller charges
+        was told nothing, for every entry."""
+        directory = tempfile.mkdtemp()
+        try:
+            path = os.path.join(directory, "v2.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(testhost.challenge(self.v2_entries()), handle, indent=2)
+            code, out, _ = run_cli(["inspect", path])
+            self.assertEqual(code, 0)
+            report = json.loads(out)
+            self.assertEqual(report["entries"], 2)
+            for rail in report["rails"]:
+                self.assertEqual(rail["amount"], "0.01")
+                self.assertEqual(rail["amount_field"], "amount")
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
+    def test_verify_does_not_call_a_v2_sellers_own_rail_malformed(self):
+        """The sharp end. `verify` is the deploy gate, and on a v2 manifest it
+        failed `existing rail still settles` - telling a seller that mounting
+        the Nano entry had broken the USDC rail they already had, on the
+        strength of reading the wrong field name."""
+        node = fakenode.FakeNode()
+        gate, protected = testhost.make_host(self.v2_entries())
+        app = build(node=node).wsgi(protected, gate=gate)
+        with live_server(app) as base:
+            code, out, _ = run_cli(["verify", base + "/report", "--json"])
+        report = json.loads(out)
+        failed = [c["name"] for c in report["checks"] if not c["pass"]]
+        self.assertEqual(failed, ["nano rail settles"],
+                         "only the missing payment proof may fail here")
+        self.assertEqual(code, 1)   # still 1: no --payment was supplied
+        settles = [c for c in report["checks"]
+                   if c["name"] == "existing rail still settles"][0]
+        self.assertTrue(settles["pass"])
+
+    def test_verify_prints_the_nano_price_not_none(self):
+        """The same read, in the line an operator actually looks at.
+
+        The Nano entry WE append carries both field names, so it cannot show
+        this defect - the entry has to be the seller's own. `append_nano`
+        leaves an array that already names Nano alone, so a seller who
+        already priced XNO the v2 way (run 135's `nano-mainnet` case) is
+        exactly whose price printed as `None`.
+        """
+        theirs = {"scheme": "exact", "network": "nano:mainnet", "asset": "XNO",
+                  "amount": str(10 ** 26), "payTo": PAY_TO,
+                  "resource": "https://example.dev/report",
+                  "maxTimeoutSeconds": 60, "extra": {"decimals": 30}}
+        self.assertNotIn("maxAmountRequired", theirs,
+                         "the fixture must not carry the field under test")
+        node = fakenode.FakeNode()
+        gate, protected = testhost.make_host(
+            [dict(testhost.USDC_ENTRIES[0]), theirs])
+        app = build(node=node).wsgi(protected, gate=gate)
+        with live_server(app) as base:
+            code, out, _ = run_cli(["verify", base + "/report", "--json"])
+        report = json.loads(out)
+        entry = [c for c in report["checks"]
+                 if c["name"] == "nano entry present and last"][0]
+        self.assertTrue(entry["pass"], "the seller's own Nano entry is last")
+        self.assertNotIn("None", entry["detail"])
+        self.assertIn(str(10 ** 26), entry["detail"],
+                      "the Nano price belongs in the detail, in raw")
+
+    def test_a_rail_that_really_is_malformed_names_the_field(self):
+        """A red check that cannot say whether the subject or the check is
+        broken gets read as the subject. This one names the entry and field."""
+        broken = [{k: v for k, v in e.items()
+                   if k not in ("maxAmountRequired", "amount")}
+                  for e in testhost.USDC_ENTRIES]
+        node = fakenode.FakeNode()
+        gate, protected = testhost.make_host(broken)
+        app = build(node=node).wsgi(protected, gate=gate)
+        with live_server(app) as base:
+            code, out, _ = run_cli(["verify", base + "/report", "--json"])
+        report = json.loads(out)
+        settles = [c for c in report["checks"]
+                   if c["name"] == "existing rail still settles"][0]
+        self.assertFalse(settles["pass"])
+        self.assertIn("accepts[0] lacks", settles["detail"])
+        self.assertIn("amount", settles["detail"])
+
+
+class ReadsAMultiResourceManifest(unittest.TestCase):
+    """`accepts[]` sits under each `resources[]` item in a manifest such as
+    `extract.paypercall.dev/.well-known/x402`. `inspect` answered
+    `no accepts[] array in this document` for all of them (dual-rail#1).
+    """
+
+    @staticmethod
+    def manifest():
+        return {"x402Version": 2, "resources": [
+            {"resource": "https://example.dev/report",
+             "accepts": [dict(testhost.USDC_ENTRIES[0])]},
+            {"resource": "https://example.dev/extract",
+             "accepts": [dict(testhost.USDC_ENTRIES[1]),
+                         dict(_challenge.nano_entry(BURN, AMOUNT,
+                                                    "https://example.dev/extract"))]},
+        ]}
+
+    def _write(self, directory, document):
+        path = os.path.join(directory, "manifest.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, indent=2)
+        return path
+
+    def test_inspect_reports_each_resource_separately(self):
+        directory = tempfile.mkdtemp()
+        try:
+            path = self._write(directory, self.manifest())
+            code, out, _ = run_cli(["inspect", path])
+            self.assertEqual(code, 0)
+            report = json.loads(out)
+            self.assertTrue(report["multi_resource"])
+            self.assertEqual(len(report["resources"]), 2)
+            self.assertEqual(report["entries"], 3)
+            self.assertTrue(report["nano_entry_present"])
+            first, second = report["resources"]
+            self.assertEqual(first["resource_label"], "https://example.dev/report")
+            self.assertFalse(first["nano_entry_present"])
+            self.assertEqual(second["resource_label"], "https://example.dev/extract")
+            self.assertTrue(second["nano_entry_present"])
+            # Per resource, not flattened: a Nano entry's index is only
+            # meaningful inside the array a client actually reads.
+            self.assertEqual(second["nano_entry_index"], 1)
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
+    def test_add_refuses_a_multi_resource_manifest_and_says_why(self):
+        """Deliberate. Choosing which resource gets the payout address is the
+        operator's call; guessing it would put an address on an endpoint
+        nobody asked to be paid for."""
+        directory = tempfile.mkdtemp()
+        try:
+            path = self._write(directory, self.manifest())
+            code, out, _ = run_cli(["add", "--manifest", path,
+                                    "--pay-to", BURN, "--amount", AMOUNT, "--diff"])
+            self.assertEqual(code, 2)
+            report = json.loads(out)
+            self.assertEqual(report["error"], "unreadable")
+            self.assertIn("multi-resource", report["message"])
+            self.assertIn("resources[]", report["message"])
+            with open(path, encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle), self.manifest(),
+                                 "add wrote to a manifest it refused")
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
+    def test_a_document_with_neither_shape_is_still_unreadable(self):
+        directory = tempfile.mkdtemp()
+        try:
+            path = self._write(directory, {"x402Version": 2, "error": "nope"})
+            code, out, _ = run_cli(["inspect", path])
+            self.assertEqual(code, 2)
+            self.assertEqual(json.loads(out)["error"], "unreadable")
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
+
 if __name__ == "__main__":
     unittest.main()
