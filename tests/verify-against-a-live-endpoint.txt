@@ -28,7 +28,7 @@ dual-rail verify https://example.dev/report
 
 [pass] 402 challenge reachable                HTTP 402, x-402-version: 2
 [pass] pre-existing rails intact              2 entries: USDC/base, USDC/solana  (unchanged)
-[pass] nano entry present and last            nano:mainnet XNO 0.0001 -> nano_3t6k35g...
+[pass] nano entry present and last            nano:mainnet XNO 100000000000000000000000000 -> nano_3t6k35g...
 [pass] nano payTo passes checksum             valid
 [pass] existing rail still settles            2 pre-existing challenges well-formed
 [pass] nano rail settles                      block 9F2C0000... -> HTTP 200
@@ -56,7 +56,7 @@ $ dual-rail verify https://example.dev/report --payment A17D00000000000000000000
     {
       "name": "nano entry present and last",
       "pass": true,
-      "detail": "nano:mainnet XNO 0.0001 -> nano_3t6k35g..."
+      "detail": "nano:mainnet XNO 100000000000000000000000000 -> nano_3t6k35g..."
     },
     {
       "name": "nano payTo passes checksum",
@@ -85,13 +85,15 @@ $ dual-rail verify https://example.dev/report --payment A17D00000000000000000000
       "scheme": "exact",
       "network": "base",
       "asset": "USDC",
-      "maxAmountRequired": "0.01"
+      "amount": "0.01",
+      "amount_field": "maxAmountRequired"
     },
     {
       "scheme": "exact",
       "network": "solana",
       "asset": "USDC",
-      "maxAmountRequired": "0.01"
+      "amount": "0.01",
+      "amount_field": "maxAmountRequired"
     }
   ],
   "rails_after": [
@@ -99,19 +101,22 @@ $ dual-rail verify https://example.dev/report --payment A17D00000000000000000000
       "scheme": "exact",
       "network": "base",
       "asset": "USDC",
-      "maxAmountRequired": "0.01"
+      "amount": "0.01",
+      "amount_field": "maxAmountRequired"
     },
     {
       "scheme": "exact",
       "network": "solana",
       "asset": "USDC",
-      "maxAmountRequired": "0.01"
+      "amount": "0.01",
+      "amount_field": "maxAmountRequired"
     },
     {
       "scheme": "exact",
       "network": "nano:mainnet",
       "asset": "XNO",
-      "maxAmountRequired": "0.0001"
+      "amount": "100000000000000000000000000",
+      "amount_field": "amount"
     }
   ]
 }

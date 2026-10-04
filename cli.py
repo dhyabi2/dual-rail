@@ -92,11 +92,73 @@ def _document_of(text, path=""):
 
 
 def _challenge_of(text, path=""):
-    """`_document_of`, and it must be a 402 challenge with an accepts[] array."""
+    """`_document_of`, and it must be a 402 challenge with an accepts[] array.
+
+    Deliberately strict for `add`: a multi-resource manifest carries one
+    accepts[] per `resources[]` item, and choosing which of them gets the
+    payout address is not a guess this tool may make on an operator's behalf.
+    `inspect` reads such a document through `_resource_sections` instead,
+    because reporting on all of them decides nothing.
+    """
     body = _document_of(text, path)
     if not isinstance(body, dict) or not isinstance(body.get("accepts"), list):
+        if isinstance(body, dict) and isinstance(body.get("resources"), list):
+            raise Unreadable(
+                "this is a multi-resource manifest: accepts[] sits under each "
+                "resources[] item, not at the top level. `dual-rail inspect` "
+                "reads it; `add` will not, because which resource gets the "
+                "payout address is the operator's choice, not this tool's - "
+                "fetch the one resource's own 402 and patch that")
         raise Unreadable("no accepts[] array in this document")
     return body
+
+
+#: How to read an entry's price, in the order the clients read it.
+#: x402 renamed the field between protocol versions - `maxAmountRequired` in
+#: v1, `amount` in v2 - and feeless402 0.2.12's `nano_pay.x402.offer_amount_raw`
+#: is `int(offer[field])` over exactly this tuple, so this is what a payer
+#: actually looks at rather than what either schema requires. Reading only the
+#: v1 name reported every v2 entry's price as `null` (issue #1), and `verify`
+#: called a v2 seller's own working rail malformed on the strength of it.
+AMOUNT_FIELDS = ("amount", "maxAmountRequired", "max_amount_required")
+
+
+def _amount_of(entry):
+    """(value, field name) for an entry's price, or (None, None).
+
+    Version-blind on purpose: a document's declared version does not bind its
+    entries - a seller spelling a v1 Nano entry inside a v2 document is the
+    case `challenge.find_nano` exists for - so the field that is *present*
+    is the one a payer will read.
+    """
+    if not isinstance(entry, dict):
+        return None, None
+    for field in AMOUNT_FIELDS:
+        if entry.get(field) is not None:
+            return entry[field], field
+    return None, None
+
+
+def _resource_sections(body):
+    """[(label, accepts)] for a document, top-level or multi-resource.
+
+    One section for an ordinary 402, one per `resources[]` item for a manifest
+    such as `extract.paypercall.dev/.well-known/x402`. Each is reported on its
+    own: flattening them would invent an accepts[] array no client ever sees
+    and would make the Nano entry's index meaningless.
+    """
+    if not isinstance(body, dict):
+        return []
+    if isinstance(body.get("accepts"), list):
+        return [(None, body["accepts"])]
+    sections = []
+    for index, item in enumerate(body.get("resources") or []):
+        if not isinstance(item, dict):
+            continue
+        accepts = item.get("accepts")
+        label = item.get("resource") or item.get("url") or "resources[%d]" % index
+        sections.append((label, accepts if isinstance(accepts, list) else []))
+    return sections
 
 
 def _is_yaml(path) -> bool:
@@ -104,9 +166,17 @@ def _is_yaml(path) -> bool:
 
 
 def _rails(accepts):
-    return [{"scheme": e.get("scheme"), "network": e.get("network"),
-             "asset": e.get("asset"), "maxAmountRequired": e.get("maxAmountRequired")}
-            for e in accepts]
+    rails = []
+    for entry in accepts:
+        if not isinstance(entry, dict):
+            rails.append({"scheme": None, "network": None, "asset": None,
+                          "amount": None, "amount_field": None})
+            continue
+        amount, field = _amount_of(entry)
+        rails.append({"scheme": entry.get("scheme"), "network": entry.get("network"),
+                      "asset": entry.get("asset"),
+                      "amount": amount, "amount_field": field})
+    return rails
 
 
 # ------------------------------------------------------------------ inspect
@@ -114,20 +184,37 @@ def _rails(accepts):
 def cmd_inspect(args) -> int:
     try:
         _, _, text = _fetch(args.target)
-        body = _challenge_of(text, args.target)
+        body = _document_of(text, args.target)
     except Exception as exc:
         print(json.dumps({"error": "unreadable", "message": str(exc)}, indent=2))
         return EXIT_USAGE
-    accepts = body["accepts"]
-    index = _challenge.find_nano(accepts)
-    print(json.dumps({
-        "target": args.target,
-        "entries": len(accepts),
-        "rails": _rails(accepts),
-        "nano_entry_present": index != -1,
-        "nano_entry_index": index,
-        "resource": _challenge.resource_of(accepts),
-    }, indent=2))
+
+    sections = _resource_sections(body)
+    if not sections:
+        print(json.dumps({"error": "unreadable",
+                          "message": "no accepts[] array in this document"}, indent=2))
+        return EXIT_USAGE
+
+    def report_for(accepts):
+        index = _challenge.find_nano(accepts)
+        return {"entries": len(accepts), "rails": _rails(accepts),
+                "nano_entry_present": index != -1, "nano_entry_index": index,
+                "resource": _challenge.resource_of(accepts)}
+
+    # A single top-level accepts[] keeps the shape it has always had; the
+    # multi-resource form reports each resource separately, because its
+    # accepts[] arrays are separate documents to every client that reads them.
+    if len(sections) == 1 and sections[0][0] is None:
+        out = {"target": args.target}
+        out.update(report_for(sections[0][1]))
+    else:
+        out = {"target": args.target, "multi_resource": True,
+               "resources": [dict(report_for(accepts), resource_label=label)
+                             for label, accepts in sections]}
+        out["entries"] = sum(r["entries"] for r in out["resources"])
+        out["nano_entry_present"] = any(r["nano_entry_present"]
+                                        for r in out["resources"])
+    print(json.dumps(out, indent=2))
     return EXIT_OK
 
 
@@ -294,19 +381,42 @@ def cmd_verify(args) -> int:
     record("nano entry present and last", index == len(accepts) - 1 and index != -1,
            "" if index == -1 else "%s %s %s -> %s"
            % (accepts[index].get("network"), accepts[index].get("asset"),
-              accepts[index].get("maxAmountRequired"), (accepts[index].get("payTo") or "")[:12] + "..."))
+              _amount_of(accepts[index])[0], (accepts[index].get("payTo") or "")[:12] + "..."))
 
     pay_to = accepts[index].get("payTo") if index != -1 else ""
     record("nano payTo passes checksum", nanoaddr.is_valid(pay_to or ""),
            nanoaddr.validate(pay_to or "").get("reason", "valid"))
 
     others = [e for i, e in enumerate(accepts) if i != index]
-    well_formed = bool(others) and all(
-        e.get("scheme") and e.get("network") and e.get("payTo") and e.get("maxAmountRequired")
-        for e in others)
-    record("existing rail still settles", well_formed,
-           "%d pre-existing challenge%s well-formed"
-           % (len(others), "" if len(others) == 1 else "s"))
+
+    def missing_fields(entry):
+        """The fields this entry needs to be payable at all, and lacks.
+
+        The price is looked up under every name x402 has used for it, not just
+        the v1 one: reading `maxAmountRequired` alone called every v2 seller's
+        own working rail malformed and failed this check on a correct manifest.
+        """
+        absent = [f for f in ("scheme", "network", "payTo")
+                  if not (isinstance(entry, dict) and entry.get(f))]
+        if _amount_of(entry)[0] is None:
+            absent.append("/".join(AMOUNT_FIELDS))
+        return absent
+
+    faults = [(i, missing_fields(e)) for i, e in enumerate(others)]
+    faults = [(i, absent) for i, absent in faults if absent]
+    well_formed = bool(others) and not faults
+    if not others:
+        detail = ("no pre-existing entry to preserve - this 402 offered nothing "
+                  "before the Nano entry, so there is no second rail to keep")
+    elif faults:
+        # Name the entry and the field, so a failure here cannot be read as
+        # "dual-rail broke my rail" when it is this check misreading one.
+        detail = "; ".join("accepts[%d] lacks %s" % (i, ", ".join(absent))
+                           for i, absent in faults)
+    else:
+        detail = ("%d pre-existing challenge%s well-formed"
+                  % (len(others), "" if len(others) == 1 else "s"))
+    record("existing rail still settles", well_formed, detail)
 
     if args.payment:
         paid_status, _, paid_text = _fetch(url, {_adapter.PAYMENT_HEADER: _proof(args.payment)})
