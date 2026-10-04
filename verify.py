@@ -4,7 +4,8 @@ Four questions, all of which must answer yes, and one that must answer
 no:
 
     the block exists and the node calls it CONFIRMED   (never accept unconfirmed)
-    its destination is exactly our payTo
+    it is a SEND                                        (a receive paid nobody)
+    its destination is exactly our payTo                (by account, not by spelling)
     its amount is >= the amount required                (integer raw, never a float)
     it has not been presented for this resource before  (one payment, one call)
 
@@ -22,6 +23,22 @@ import challenge as _challenge
 import money
 import nanoaddr
 import nanonode
+
+
+def _same_account(left, right) -> bool:
+    """True only when both sides decode to the same public key.
+
+    One Nano account has two spellings - `nano_` and the legacy `xrb_` - and a
+    node is free to serve either, so comparing the text can refuse a payment
+    that did arrive. Two different accounts can never share a public key, so
+    this widens nothing: it accepts the same account written the other way and
+    nothing else. A destination that is not an address at all decodes to
+    nothing and is therefore equal to nothing.
+    """
+    try:
+        return nanoaddr.decode(left) == nanoaddr.decode(right)
+    except nanoaddr.InvalidAddress:
+        return False
 
 
 class Unpaid(Exception):
@@ -123,12 +140,27 @@ def verify(header: str, pay_to: str, amount_raw: int, resource, node: nanonode.N
     if not info.get("confirmed"):
         raise Unpaid("unconfirmed", "block %s is not confirmed yet" % block_hash[:12])
 
+    if info.get("subtype") != "send":
+        # A block that is not a send paid nobody, so it cannot be a proof that
+        # anybody paid us. The one that matters is a RECEIVE on our own payout
+        # account: it is confirmed, it carries a real amount, its hash is public
+        # in our account history, and before this check it verified - so any
+        # stranger could read our ledger and be served for free. A change or an
+        # epoch block carries no amount and was already refused as underpaid,
+        # but it was refused for the wrong reason.
+        raise Unpaid("not_a_send",
+                     "block %s is a %s, not a send: it paid nobody"
+                     % (block_hash[:12], info.get("subtype") or "block of an unreadable kind"))
+    if not nanoaddr.is_valid(pay_to):
+        # Checked before the comparison below, so a seller who misconfigured
+        # their own payTo is told that, rather than the payer being told their
+        # correct payment went to the wrong place.
+        raise Unpaid("invalid_payto", "payTo fails its checksum")
+
     destination = info.get("destination")
-    if destination != pay_to:
+    if not _same_account(destination, pay_to):
         raise Unpaid("wrong_destination",
                      "block %s paid %s, not %s" % (block_hash[:12], destination, pay_to))
-    if not nanoaddr.is_valid(pay_to):                   # pragma: no cover - construction checks
-        raise Unpaid("invalid_payto", "payTo fails its checksum")
 
     paid_raw = int(info.get("amount_raw", 0))
     if paid_raw < amount_raw:

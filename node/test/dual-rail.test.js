@@ -375,3 +375,135 @@ test('the entry is still only appended', () => {
   assert.deepEqual(patched.accepts.slice(0, -1), before);
   assert.equal(patched.accepts.length, before.length + 1);
 });
+
+// ---------------------------------------------------------------------------
+// Only a send is a payment. The Node half of the same cases in
+// tests/test_dual_rail.py, including the two replies recorded from a live
+// mainnet node (rpc.nano.to, Nano V28.2) on 2026-10-04.
+
+const { DualRail, Unpaid } = require('../dual-rail.js');
+const { readBlockInfo } = require('../node-client.js');
+
+// A RECEIVE on a real account: money arriving. `block_account` is the account
+// the block belongs to - the receiver - and there is no payee anywhere in it.
+const RECEIVE_REPLY = {
+  block_account: 'nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd',
+  amount: '50000000000000000000000000000000',
+  confirmed: 'true',
+  subtype: 'receive',
+  contents: { type: 'state',
+              link_as_account:
+                'nano_1s7fdbg491z6eo64sz3ghjhxzpkgbn6baxznfy6eaeu8epwkmzpz9yc76c7f' },
+};
+const RECEIVER = RECEIVE_REPLY.block_account;
+
+// A LEGACY (pre-state) send, block 2 of the genesis account. No `subtype` at
+// all, kind in `contents.type`, payee in `contents.destination`.
+const LEGACY_SEND_REPLY = {
+  block_account: 'nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3',
+  amount: '3271945835778254456378601994536232802',
+  confirmed: 'true',
+  contents: { type: 'send',
+              destination:
+                'nano_13ezf4od79h1tgj9aiu4djzcmmguendtjfuhwfukhuucboua8cpoihmh8byo' },
+};
+const LEGACY_SENDER = LEGACY_SEND_REPLY.block_account;
+const LEGACY_PAYEE = LEGACY_SEND_REPLY.contents.destination;
+
+class RecordedNode {
+  constructor(reply) { this.reply = reply; this.calls = []; }
+
+  async blockInfo(blockHash) {
+    this.calls.push(blockHash.toUpperCase());
+    return readBlockInfo(this.reply);
+  }
+}
+
+async function verdict(node, payTo, amountXno = AMOUNT) {
+  const rail = new DualRail({ payTo, amountXno, node });
+  try {
+    await rail.verify(proof(), RESOURCE);
+    return 'paid';
+  } catch (err) {
+    if (err instanceof Unpaid) return err.reason;
+    throw err;
+  }
+}
+
+test('a receive on our own account is not a payment', async () => {
+  const node = new testhost.FakeNode();
+  node.received(BLOCK, AMOUNT_RAW * 100n);
+  assert.equal(await verdict(node, PAY_TO), 'not_a_send');
+});
+
+test('a recorded receive names no payee at all', () => {
+  const info = readBlockInfo(RECEIVE_REPLY);
+  assert.equal(info.subtype, 'receive');
+  assert.equal(info.destination, null,
+    'a receive has no payee, so none may be invented for it');
+  assert.equal(info.amount_raw, 50n * 10n ** 30n);
+});
+
+test('a recorded receive does not pay the account it credited', async () => {
+  assert.equal(await verdict(new RecordedNode(RECEIVE_REPLY), RECEIVER, '0.000001'),
+    'not_a_send');
+});
+
+test('a change block is refused as what it is, not as underpaid', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, null, 0n, true, 'change');
+  assert.equal(await verdict(node, PAY_TO), 'not_a_send');
+});
+
+test('a block whose kind cannot be read is not a send', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, PAY_TO, AMOUNT_RAW, true, null);
+  assert.equal(await verdict(node, PAY_TO), 'not_a_send');
+});
+
+test('a legacy send names its own payee, not its account', () => {
+  const info = readBlockInfo(LEGACY_SEND_REPLY);
+  assert.equal(info.subtype, 'send');
+  assert.equal(info.destination, LEGACY_PAYEE);
+  assert.notEqual(info.destination, LEGACY_SENDER);
+});
+
+test('a legacy send out of our account is not a payment to us', async () => {
+  assert.equal(await verdict(new RecordedNode(LEGACY_SEND_REPLY), LEGACY_SENDER, '0.000001'),
+    'wrong_destination');
+});
+
+test('a legacy send to us is a payment', async () => {
+  assert.equal(await verdict(new RecordedNode(LEGACY_SEND_REPLY), LEGACY_PAYEE, '0.000001'),
+    'paid');
+});
+
+// Named for what it reaches: `DualRail` normalises payTo at construction
+// (`this.payTo = verdict.normalised`), so this case never gets as far as the
+// comparison - reverting `sameAccount` to a text compare leaves it green. The
+// comparison itself is reached by the node-side spelling, below.
+test('a payTo given the legacy xrb_ way is normalised at construction', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, PAY_TO, AMOUNT_RAW);
+  const rail = new DualRail({ payTo: 'xrb_' + PAY_TO.slice(5), amountXno: AMOUNT, node });
+  assert.equal(rail.payTo, PAY_TO);
+  assert.equal(await verdict(node, 'xrb_' + PAY_TO.slice(5)), 'paid');
+});
+
+test('the node may spell the destination the legacy way', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, 'xrb_' + PAY_TO.slice(5), AMOUNT_RAW);
+  assert.equal(await verdict(node, PAY_TO), 'paid');
+});
+
+test('a different account is still a different account', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, BURN, AMOUNT_RAW);
+  assert.equal(await verdict(node, PAY_TO), 'wrong_destination');
+});
+
+test('a destination that is not an address is equal to nothing', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, 'not an address', AMOUNT_RAW);
+  assert.equal(await verdict(node, PAY_TO), 'wrong_destination');
+});

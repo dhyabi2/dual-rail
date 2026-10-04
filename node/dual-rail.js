@@ -92,6 +92,25 @@ function blockHashOf(payload) {
   throw new Unpaid('malformed_payment', 'X-PAYMENT carries no block hash');
 }
 
+// True only when both sides decode to the same public key. One Nano account has
+// two spellings - `nano_` and the legacy `xrb_` - and a node is free to serve
+// either, so comparing the text can refuse a payment that did arrive. Two
+// different accounts can never share a public key, so this widens nothing: it
+// accepts the same account written the other way and nothing else. A destination
+// that is not an address at all decodes to nothing and is equal to nothing.
+function sameAccount(left, right) {
+  let a;
+  let b;
+  try {
+    a = address.decode(left);
+    b = address.decode(right);
+  } catch (err) {
+    if (err instanceof address.InvalidAddress) return false;
+    throw err;
+  }
+  return Buffer.from(a).equals(Buffer.from(b));
+}
+
 function isOurs(payload) {
   const network = payload.network
     ?? (payload.payload && typeof payload.payload === 'object' ? payload.payload.network : undefined);
@@ -178,7 +197,25 @@ class DualRail {
     if (!info.confirmed) {
       throw new Unpaid('unconfirmed', `block ${blockHash.slice(0, 12)} is not confirmed yet`);
     }
-    if (info.destination !== this.payTo) {
+    if (info.subtype !== 'send') {
+      // A block that is not a send paid nobody, so it cannot be a proof that
+      // anybody paid us. The one that matters is a RECEIVE on our own payout
+      // account: it is confirmed, it carries a real amount, its hash is public
+      // in our account history, and before this check it verified - so any
+      // stranger could read our ledger and be served for free. A change or an
+      // epoch block carries no amount and was already refused as underpaid, but
+      // it was refused for the wrong reason.
+      throw new Unpaid('not_a_send',
+        `block ${blockHash.slice(0, 12)} is a ` +
+        `${info.subtype || 'block of an unreadable kind'}, not a send: it paid nobody`);
+    }
+    if (!address.isValid(this.payTo)) {
+      // Checked before the comparison below, so a seller who misconfigured
+      // their own payTo is told that, rather than the payer being told their
+      // correct payment went to the wrong place.
+      throw new Unpaid('invalid_payto', 'payTo fails its checksum');
+    }
+    if (!sameAccount(info.destination, this.payTo)) {
       throw new Unpaid('wrong_destination',
         `block ${blockHash.slice(0, 12)} paid ${info.destination}, not ${this.payTo}`);
     }

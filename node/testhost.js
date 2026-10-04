@@ -51,14 +51,23 @@ function makeHost(entries, body = BODY) {
 class FakeNode {
   constructor() { this.blocks = new Map(); this.calls = []; }
 
-  settle(blockHash, destination, amountRaw, confirmed = true) {
+  settle(blockHash, destination, amountRaw, confirmed = true, subtype = 'send') {
     this.blocks.set(blockHash.toUpperCase(), {
-      confirmed, destination, amount_raw: BigInt(amountRaw), subtype: 'send' });
+      confirmed,
+      // Only a send has a destination, exactly as `blockInfo` reports it.
+      destination: subtype === 'send' ? destination : null,
+      amount_raw: BigInt(amountRaw),
+      subtype });
     return blockHash.toUpperCase();
   }
 
   unconfirmed(blockHash, destination, amountRaw) {
     return this.settle(blockHash, destination, amountRaw, false);
+  }
+
+  // A confirmed RECEIVE block: money arrived, and it paid nobody.
+  received(blockHash, amountRaw, confirmed = true) {
+    return this.settle(blockHash, null, amountRaw, confirmed, 'receive');
   }
 
   async blockInfo(blockHash) {
