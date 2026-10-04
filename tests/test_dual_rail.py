@@ -433,6 +433,166 @@ class ErrorTable(unittest.TestCase):
 
 # ---------------------------------------------------------------- the money
 
+class AdvertisedAmountIsPayable(unittest.TestCase):
+    """`maxAmountRequired` must be the ATOMIC amount - raw - or no x402 Nano
+    client can pay the entry this adapter appends.
+
+    It carried the configured decimal XNO string verbatim ("0.0001"). Every
+    x402 client reads that field as an integer count of the asset's atomic
+    unit, which is what `extra.decimals: 30` declares it to be; the reference
+    Nano client, feeless402, reads it as literally `int(offer[field])`. So a
+    402 this adapter had patched raised
+
+        ValueError: invalid literal for int() with base 10: '0.0001'
+
+    inside the payer, and the agent could not buy at all - the one thing this
+    adapter exists to make possible. The seller was never at risk (the adapter
+    checks a payment against `money.check_price(amount_xno)`, which never
+    changed, so a short payment was still refused as underpaid); the loss was
+    the sale.
+    """
+
+    def entry(self, amount=AMOUNT):
+        patched = _challenge.append_nano(
+            {"accepts": [{"scheme": "exact", "network": "base", "asset": "USDC",
+                          "maxAmountRequired": "10000", "payTo": "0xabc",
+                          "resource": RESOURCE}]},
+            PAY_TO, amount)
+        return patched["accepts"][-1]
+
+    def test_the_advertised_amount_is_an_integer_of_raw(self):
+        field = self.entry()["maxAmountRequired"]
+        self.assertTrue(field.isdigit(),
+                        "maxAmountRequired must be an integer string of raw, got %r" % field)
+        self.assertEqual(int(field), AMOUNT_RAW)
+
+    def test_a_client_reading_it_the_x402_way_gets_the_configured_price(self):
+        """Exactly what feeless402's `offer_amount_raw` does: int(the field)."""
+        entry = self.entry()
+        self.assertEqual(int(entry["maxAmountRequired"]), money.xno_to_raw(AMOUNT))
+
+    def test_what_the_adapter_accepts_is_what_it_advertises(self):
+        """The advertised figure and the figure a payment is checked against
+        must be the same number, or the rail either overcharges or undersells."""
+        a = build(node=fakenode.FakeNode())
+        self.assertEqual(int(self.entry()["maxAmountRequired"]), a.amount_raw)
+
+    def test_the_decimal_figure_is_still_there_for_a_human(self):
+        self.assertEqual(self.entry()["maxAmountRequiredFormatted"], "%s XNO" % AMOUNT)
+
+    def test_the_hardest_prices_survive_the_wire(self):
+        """A price a float would round must come back exactly, through the
+        string that actually goes on the wire."""
+        for amount in ("0.000001", "0.1", "0.3", "100", "99.999999",
+                       "0.000000000000000000000000000003"):
+            field = self.entry(amount)["maxAmountRequired"]
+            self.assertTrue(field.isdigit(), amount)
+            self.assertEqual(int(field), money.xno_to_raw(amount), amount)
+            self.assertEqual(money.raw_to_xno(int(field)).rstrip("."),
+                             amount.rstrip(".") if "." in amount else amount, amount)
+
+
+class EntryIsAValidPaymentRequirements(unittest.TestCase):
+    """The appended entry must satisfy the official x402 `PaymentRequirements`
+    schema, not merely be readable by one lenient client.
+
+    Getting the unit right is not enough. Measured against the published
+    packages in a session that had npm (`@x402/core` 2.28.0,
+    `@x402nano/exact` 0.3.0), the entry this adapter emitted was **rejected by
+    both protocol versions' schemas** for two reasons that have nothing to do
+    with raw:
+
+        PaymentRequirementsV1Schema: REJECTED  maxTimeoutSeconds: invalid_type
+        PaymentRequirementsV2Schema: REJECTED  amount: invalid_type
+                                               maxTimeoutSeconds: invalid_type
+
+    x402 renamed the amount field between versions - v1 `maxAmountRequired`,
+    v2 `amount` - and this adapter appends to somebody else's challenge, whose
+    version it does not choose, so it has to carry both. Each version's schema
+    strips the other version's field rather than rejecting it, so carrying both
+    is accepted by v1, by v2 and by the `PaymentRequirements` union; carrying
+    one is rejected outright by the other version.
+
+    `maxTimeoutSeconds` was simply absent, and both versions require it.
+
+    The two sets below are the measurement, taken by deleting one key at a time
+    from an otherwise-valid entry and recording which schema then refused it.
+    They are hard-coded on purpose: this suite must not reach the network, and a
+    JS dependency is not available to a Python test. The end-to-end check
+    against the real schemas is in the pull request that added this class.
+    """
+
+    V1_REQUIRES = ("scheme", "network", "asset", "maxAmountRequired", "payTo",
+                   "resource", "description", "maxTimeoutSeconds")
+    V2_REQUIRES = ("scheme", "network", "asset", "amount", "payTo",
+                   "maxTimeoutSeconds")
+
+    def entry(self, amount=AMOUNT):
+        patched = _challenge.append_nano(
+            {"accepts": [{"scheme": "exact", "network": "base", "asset": "USDC",
+                          "maxAmountRequired": "10000", "payTo": "0xabc",
+                          "resource": RESOURCE}]},
+            PAY_TO, amount)
+        return patched["accepts"][-1]
+
+    def test_every_field_x402_v1_requires_is_present(self):
+        entry = self.entry()
+        missing = [f for f in self.V1_REQUIRES if entry.get(f) is None]
+        self.assertEqual(missing, [],
+                         "x402 v1 rejects the entry without %s" % missing)
+
+    def test_every_field_x402_v2_requires_is_present(self):
+        entry = self.entry()
+        missing = [f for f in self.V2_REQUIRES if entry.get(f) is None]
+        self.assertEqual(missing, [],
+                         "x402 v2 rejects the entry without %s" % missing)
+
+    def test_both_amount_names_carry_the_same_integer(self):
+        """A payer that reads either name must be told to send the same amount.
+        If these two ever disagree, the entry overcharges one half of the
+        ecosystem and undersells the other."""
+        entry = self.entry()
+        self.assertEqual(entry["amount"], entry["maxAmountRequired"])
+        self.assertTrue(entry["amount"].isdigit(), entry["amount"])
+        self.assertEqual(int(entry["amount"]), AMOUNT_RAW)
+
+    def test_a_v2_client_reading_amount_gets_the_configured_price(self):
+        """feeless402's `offer_amount_raw` tries `amount` FIRST, then
+        `maxAmountRequired`, so `amount` is the field that is actually read."""
+        self.assertEqual(int(self.entry()["amount"]), money.xno_to_raw(AMOUNT))
+
+    def test_what_the_adapter_accepts_is_what_both_names_advertise(self):
+        a = build(node=fakenode.FakeNode())
+        entry = self.entry()
+        self.assertEqual(int(entry["amount"]), a.amount_raw)
+        self.assertEqual(int(entry["maxAmountRequired"]), a.amount_raw)
+
+    def test_the_payment_window_is_a_positive_whole_number_of_seconds(self):
+        window = self.entry()["maxTimeoutSeconds"]
+        self.assertIsInstance(window, int)
+        self.assertNotIsInstance(window, bool)
+        self.assertGreater(window, 0)
+        self.assertEqual(window, _challenge.MAX_TIMEOUT_SECONDS)
+
+    def test_both_names_hold_for_every_hard_price(self):
+        for amount in ("0.000001", "0.1", "0.3", "100", "99.999999",
+                       "0.000000000000000000000000000003"):
+            entry = self.entry(amount)
+            self.assertEqual(entry["amount"], entry["maxAmountRequired"], amount)
+            self.assertEqual(int(entry["amount"]), money.xno_to_raw(amount), amount)
+
+    def test_the_entry_is_still_only_appended(self):
+        """The extra fields must not have cost the one hard guarantee: the
+        entries that were already there are untouched."""
+        before = [{"scheme": "exact", "network": "base", "asset": "USDC",
+                   "maxAmountRequired": "10000", "payTo": "0xabc",
+                   "resource": RESOURCE}]
+        patched = _challenge.append_nano({"accepts": copy.deepcopy(before)},
+                                         PAY_TO, AMOUNT)
+        self.assertEqual(patched["accepts"][:-1], before)
+        self.assertEqual(len(patched["accepts"]), len(before) + 1)
+
+
 class Money(unittest.TestCase):
 
     def test_one_raw_below_is_below(self):

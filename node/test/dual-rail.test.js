@@ -271,3 +271,107 @@ test('the hardest decimals round trip in BigInt', () => {
   }
   assert.equal(money.xnoToRaw('0.1') + money.xnoToRaw('0.2'), money.xnoToRaw('0.3'));
 });
+
+// `maxAmountRequired` must be the ATOMIC amount - raw - or no x402 Nano client
+// can pay the entry this adapter appends. It carried the configured decimal XNO
+// string verbatim ('0.0001'); every x402 client reads the field as an integer
+// count of the asset's atomic unit, which is what `extra.decimals: 30` declares
+// it to be, so a patched 402 was unpayable. Mirrors AdvertisedAmountIsPayable in
+// tests/test_dual_rail.py; the conformance suite asserts the two agree.
+function nanoEntryFor(amountXno) {
+  const patched = challenge.appendNano(
+    { accepts: [{ scheme: 'exact', network: 'base', asset: 'USDC',
+                  maxAmountRequired: '10000', payTo: '0xabc',
+                  resource: 'https://example.dev/report' }] },
+    PAY_TO, amountXno);
+  return patched.accepts[patched.accepts.length - 1];
+}
+
+test('the advertised amount is an integer of raw', () => {
+  const field = nanoEntryFor('0.0001').maxAmountRequired;
+  assert.match(field, /^[0-9]+$/, `maxAmountRequired must be integer raw, got ${field}`);
+  assert.equal(BigInt(field), money.xnoToRaw('0.0001'));
+});
+
+test('a client reading maxAmountRequired the x402 way gets the configured price', () => {
+  // Exactly what feeless402's offer_amount_raw does: parse the field as an integer.
+  assert.equal(BigInt(nanoEntryFor('0.0001').maxAmountRequired), 10n ** 26n);
+});
+
+test('the decimal figure is still there for a human', () => {
+  assert.equal(nanoEntryFor('0.0001').maxAmountRequiredFormatted, '0.0001 XNO');
+});
+
+test('the hardest prices survive the wire', () => {
+  for (const amount of ['0.000001', '0.1', '0.3', '100', '99.999999',
+                        '0.' + '0'.repeat(29) + '1']) {
+    const field = nanoEntryFor(amount).maxAmountRequired;
+    assert.match(field, /^[0-9]+$/, amount);
+    assert.equal(BigInt(field), money.xnoToRaw(amount), amount);
+    assert.equal(money.rawToXno(BigInt(field)), amount, amount);
+  }
+});
+
+// Getting the unit right was not enough: measured against the published packages
+// (`@x402/core` 2.28.0, `@x402nano/exact` 0.3.0), the entry was REJECTED by both
+// protocol versions' schemas - v1 for a missing `maxTimeoutSeconds`, v2 for a
+// missing `amount` AND `maxTimeoutSeconds`. x402 renamed the amount field between
+// versions and this adapter appends to somebody else's challenge, so it carries
+// both names; each version's schema strips the other's field rather than refusing
+// it. Mirrors EntryIsAValidPaymentRequirements in tests/test_dual_rail.py.
+const V1_REQUIRES = ['scheme', 'network', 'asset', 'maxAmountRequired', 'payTo',
+                     'resource', 'description', 'maxTimeoutSeconds'];
+const V2_REQUIRES = ['scheme', 'network', 'asset', 'amount', 'payTo',
+                     'maxTimeoutSeconds'];
+
+test('every field x402 v1 requires is present', () => {
+  const entry = nanoEntryFor('0.0001');
+  const missing = V1_REQUIRES.filter((f) => entry[f] === undefined || entry[f] === null);
+  assert.deepEqual(missing, [], `x402 v1 rejects the entry without ${missing}`);
+});
+
+test('every field x402 v2 requires is present', () => {
+  const entry = nanoEntryFor('0.0001');
+  const missing = V2_REQUIRES.filter((f) => entry[f] === undefined || entry[f] === null);
+  assert.deepEqual(missing, [], `x402 v2 rejects the entry without ${missing}`);
+});
+
+test('both amount names carry the same integer', () => {
+  // If these ever disagree the entry overcharges one half of the ecosystem and
+  // undersells the other.
+  const entry = nanoEntryFor('0.0001');
+  assert.equal(entry.amount, entry.maxAmountRequired);
+  assert.match(entry.amount, /^[0-9]+$/, entry.amount);
+  assert.equal(BigInt(entry.amount), AMOUNT_RAW);
+});
+
+test('a v2 client reading amount gets the configured price', () => {
+  // feeless402's offer_amount_raw tries `amount` FIRST, then `maxAmountRequired`.
+  assert.equal(BigInt(nanoEntryFor('0.0001').amount), money.xnoToRaw('0.0001'));
+});
+
+test('the payment window is a positive whole number of seconds', () => {
+  const window = nanoEntryFor('0.0001').maxTimeoutSeconds;
+  assert.equal(typeof window, 'number');
+  assert.ok(Number.isInteger(window), `${window} is not a whole number of seconds`);
+  assert.ok(window > 0);
+  assert.equal(window, challenge.MAX_TIMEOUT_SECONDS);
+});
+
+test('both names hold for every hard price', () => {
+  for (const amount of ['0.000001', '0.1', '0.3', '100', '99.999999',
+                        '0.' + '0'.repeat(29) + '1']) {
+    const entry = nanoEntryFor(amount);
+    assert.equal(entry.amount, entry.maxAmountRequired, amount);
+    assert.equal(BigInt(entry.amount), money.xnoToRaw(amount), amount);
+  }
+});
+
+test('the entry is still only appended', () => {
+  const before = [{ scheme: 'exact', network: 'base', asset: 'USDC',
+                    maxAmountRequired: '10000', payTo: '0xabc', resource: RESOURCE }];
+  const patched = challenge.appendNano(
+    { accepts: JSON.parse(JSON.stringify(before)) }, PAY_TO, AMOUNT);
+  assert.deepEqual(patched.accepts.slice(0, -1), before);
+  assert.equal(patched.accepts.length, before.length + 1);
+});

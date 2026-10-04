@@ -50,7 +50,8 @@ account there.
       { "scheme": "exact", "network": "base",   "asset": "USDC", ... },
       { "scheme": "exact", "network": "solana", "asset": "USDC", ... },
 +     { "scheme": "exact", "network": "nano:mainnet", "asset": "XNO",
-+       "maxAmountRequired": "0.0001", "payTo": "nano_3t6k…",
++       "maxAmountRequired": "100000000000000000000000000",
++       "maxAmountRequiredFormatted": "0.0001 XNO", "payTo": "nano_3t6k…",
 +       "description": "Feeless native-coin settlement. Optional — the entries above are unchanged.",
 +       "extra": { "decimals": 30, "adapter": "dual-rail/1" } }
     ]
@@ -59,6 +60,15 @@ account there.
 
 Same status code, same headers, same ordering, same `x-402-version`. One
 additional element at the end of `accepts[]`, and nothing else.
+
+`maxAmountRequired` is in **raw**, the asset's atomic unit, which is what
+`extra.decimals: 30` declares it to be — 10\*\*30 raw to the XNO, so the
+figure above is 0.0001 XNO. That is how every x402 client reads the field
+(feeless402's `offer_amount_raw` is `int(offer["maxAmountRequired"])`), and it
+is the same convention the USDC entries above use: their `"10000"` is 0.01 USDC
+at 6 decimals, not ten thousand dollars. `maxAmountRequiredFormatted` carries
+the decimal figure for a human. You still configure the price in XNO
+(`amountXno: "0.0001"`); only the wire format is raw.
 
 ## The verifier is the product
 

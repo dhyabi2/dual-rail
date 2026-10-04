@@ -274,16 +274,29 @@ class Document(unittest.TestCase):
         self.assertTrue(report["payable"], report["problems"])
         self.assertEqual(len(report["nano_entries"]), 1)
 
-    def test_what_this_package_emits_today_is_not_payable_by_a_v2_client(self):
-        """The defect in dhyabi2/dual-rail#1, measured from the outside: the
-        appended entry carries v1's `maxAmountRequired` in decimal XNO and no
-        `maxTimeoutSeconds`, so a v2 client drops it."""
+    def test_what_this_package_emits_is_payable_by_both_versions(self):
+        """The validator pointed back at the emitter, which is the only way
+        this repository can know its own output is payable.
+
+        This test was written the other way round and asserted the entry was
+        NOT payable, because on `main` it was not: `nano_entry` carried v1's
+        `maxAmountRequired` in decimal XNO and no `maxTimeoutSeconds`, so a v2
+        client dropped it. That is dhyabi2/dual-rail#1, and the branch this
+        test now sits on is what fixed it - the entry carries the amount in raw
+        under both versions' names plus the payment window. The assertion is
+        inverted rather than deleted: it is the same fact, and now it guards the
+        fix instead of recording the defect.
+        """
         patched = _challenge.append_nano(testhost.challenge(), OURS, "0.0001")
-        report = declaration.inspect(patched)
-        self.assertFalse(report["payable"])
-        codes = {p["code"] for p in report["nano_entries"][0]["checks"]["2"]["problems"]}
-        self.assertIn("field_missing", codes)
-        self.assertIn("amount_field_is_other_version_name", codes)
+        entry = patched["accepts"][-1]
+        for version in (1, 2):
+            check = declaration.check_entry(entry, version)
+            self.assertTrue(check["payable"],
+                            "x402 v%d would refuse our own entry: %s"
+                            % (version, [p["code"] for p in check["problems"]]))
+        # and the amount both versions are told is the configured price
+        self.assertEqual(entry["amount"], entry["maxAmountRequired"])
+        self.assertEqual(int(entry["amount"]), money.xno_to_raw("0.0001"))
 
     def test_a_sibling_entry_sinks_the_whole_document(self):
         """Our entry can be perfect and still never get paid: a client parses
