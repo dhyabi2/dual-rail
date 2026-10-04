@@ -64,7 +64,8 @@ async function payments(cases) {
     const node = new testhost.FakeNode();
     if (testCase.block) {
       node.settle(testCase.block.hash, testCase.block.destination,
-                  BigInt(testCase.block.amount_raw), testCase.block.confirmed);
+                  BigInt(testCase.block.amount_raw), testCase.block.confirmed,
+                  testCase.block.subtype === undefined ? 'send' : testCase.block.subtype);
     }
     const rail = new DualRail({ payTo: PAY_TO, amountXno: testCase.required || AMOUNT, node });
     const resource = testCase.resource || 'https://example.dev/report';

@@ -87,6 +87,26 @@ def build_matrix():
             {"header": "", "block": None},
             {"header": _proof(BLOCK), "block": _block(BLOCK, PAY_TO, 10 ** 30, True),
              "required": "100"},
+            # A block that paid nobody is not a proof that anybody paid us, and
+            # the two bindings must refuse it for the same named reason.
+            {"header": _proof(BLOCK),
+             "block": _block(BLOCK, PAY_TO, 10 ** 30, True, subtype="receive")},
+            {"header": _proof(BLOCK),
+             "block": _block(BLOCK, PAY_TO, 0, True, subtype="change")},
+            {"header": _proof(BLOCK),
+             "block": _block(BLOCK, PAY_TO, 10 ** 30, True, subtype="epoch")},
+            {"header": _proof(BLOCK),
+             "block": _block(BLOCK, PAY_TO, 10 ** 26, True, subtype=None)},
+            {"header": _proof(BLOCK),
+             "block": _block(BLOCK, PAY_TO, 10 ** 26, False, subtype="receive")},
+            # One account, two spellings: the node may serve either.
+            {"header": _proof(BLOCK),
+             "block": _block(BLOCK, "xrb_" + PAY_TO[5:], 10 ** 26, True)},
+            {"header": _proof(BLOCK),
+             "block": _block(BLOCK, "xrb_" + BURN[5:], 10 ** 26, True)},
+            {"header": _proof(BLOCK),
+             "block": _block(BLOCK, "not an address", 10 ** 26, True)},
+            {"header": _proof(BLOCK), "block": _block(BLOCK, None, 10 ** 26, True)},
         ],
     }
 
@@ -177,9 +197,10 @@ def _proof(block_hash):
                        "payload": {"blockHash": block_hash}})
 
 
-def _block(block_hash, destination, amount_raw, confirmed):
+def _block(block_hash, destination, amount_raw, confirmed, subtype="send"):
     return {"hash": block_hash, "destination": destination,
-            "amount_raw": str(amount_raw), "confirmed": confirmed}
+            "amount_raw": str(amount_raw), "confirmed": confirmed,
+            "subtype": subtype}
 
 
 # ----------------------------------------------------- the Python half
@@ -246,7 +267,7 @@ def _payment_case(case):
     block = case.get("block")
     if block:
         node.settle(block["hash"], block["destination"], int(block["amount_raw"]),
-                    block["confirmed"])
+                    block["confirmed"], block.get("subtype", "send"))
     rail = _adapter.dual_rail(payTo=PAY_TO, amountXno=case.get("required") or AMOUNT, node=node)
     resource = case.get("resource") or "https://example.dev/report"
     if case.get("replay"):

@@ -37,9 +37,44 @@ def host_of(url: str) -> str:
         return "the configured node"
 
 
+def read_block_info(answer: dict) -> dict:
+    """What one `block_info` reply means, with no socket in the way.
+
+    Separate from the HTTP call so the shapes a real node answers can be
+    asserted against recorded replies rather than against a mock of our own
+    assumptions - the assumption is what was wrong here.
+    """
+    contents = answer.get("contents") or {}
+    # A state block names its kind in `subtype`; a legacy block has no
+    # `subtype` at all and names its kind in `contents.type` (measured against
+    # mainnet: a 2019 send answers subtype=None, contents.type="send",
+    # contents.destination set and contents.link_as_account absent). Either way
+    # the kind is read off the block and never defaulted, so a block whose kind
+    # we cannot read is not a send.
+    subtype = answer.get("subtype") or contents.get("type")
+    destination = None
+    if subtype == "send":
+        # The payee, from wherever this block spells it. Never `block_account`,
+        # which is the account the block BELONGS to - on a send that is the
+        # payer, and on a receive it is us.
+        destination = contents.get("link_as_account") or contents.get("destination")
+    return {
+        "confirmed": str(answer.get("confirmed", "false")).lower() == "true",
+        "destination": destination,
+        "amount_raw": int(answer["amount"]) if answer.get("amount") else 0,
+        "subtype": subtype,
+    }
+
+
 class NanoNode:
     def block_info(self, block_hash: str) -> dict:
-        """`{"confirmed","destination","amount_raw","subtype"}`, or {} if unknown."""
+        """`{"confirmed","destination","amount_raw","subtype"}`, or {} if unknown.
+
+        `subtype` is the block's own kind, read off the block. `destination`
+        is filled in only for a send, because only a send has one: for any
+        other kind it is `None`, and a caller must not read a payee out of a
+        block that never paid anybody.
+        """
         raise NotImplementedError
 
 
@@ -70,11 +105,4 @@ class HttpNanoNode(NanoNode):
                 return {}
             raise NodeError("node_error", "the Nano node at %s returned: %s"
                             % (host_of(self.url), answer["error"]))
-        contents = answer.get("contents") or {}
-        return {
-            "confirmed": str(answer.get("confirmed", "false")).lower() == "true",
-            "destination": answer.get("block_account") if answer.get("subtype") != "send"
-                           else contents.get("link_as_account"),
-            "amount_raw": int(answer["amount"]) if answer.get("amount") else 0,
-            "subtype": answer.get("subtype"),
-        }
+        return read_block_info(answer)

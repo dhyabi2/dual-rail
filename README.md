@@ -20,8 +20,8 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 96 tests, includes the Python/Node conformance run
-(cd node && npm test)                           # 55 tests
+python3 -m unittest discover -s tests          # 109 tests, includes the Python/Node conformance run
+(cd node && npm test)                           # 67 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
 
@@ -253,10 +253,10 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 96 tests — OK
+Ran 109 tests — OK
 
 $ cd node && npm test
-# pass 55
+# pass 67
 
 $ python3 -m unittest tests.test_conformance
 ```
@@ -281,7 +281,8 @@ No test in this repository reaches a Nano node or any host but 127.0.0.1.
 ## What it does not do
 
 It does not run a node, hold a key, or sign anything — it only reads whether a
-block you were paid is confirmed. It does not choose your price. It does not
+block you were paid is a confirmed **send to your account**. It does not choose
+your price. It does not
 touch your existing rails, and it is built so that it cannot: `assert_additive`
 compares the array before and after and raises unless the prefix is deeply equal
 and exactly one element was added.
@@ -306,6 +307,14 @@ Foundation or x402 Foundation project.
 - **Your node is your trust anchor.** A payment counts when the node you
   configure says the block is confirmed; the adapter does not cross-check a
   second node.
+- **A proof must be a send to your account, and only that.** Until
+  2026-10-04 a confirmed block of any other kind whose `block_account` was your
+  payout address verified — which a *receive* on your own account is. Every
+  receive hash is public in your account history, so a stranger could read your
+  ledger and be served without paying. The payee is now read from the block's own
+  send destination, anything that is not a send is refused as `not_a_send`, and
+  the two accounts are compared by public key rather than by the `nano_`/`xrb_`
+  spelling a node happens to serve.
 - Version 1.0.0; not yet on PyPI or npm.
 
 MIT licensed - see `LICENSE`.

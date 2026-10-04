@@ -28,6 +28,7 @@ import cli
 import fakenode
 import money
 import nanoaddr
+import nanonode
 import testhost
 import verify as _verify
 
@@ -920,6 +921,176 @@ class ReadsAMultiResourceManifest(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(directory)
+
+# ------------------------------------------------------------------------------
+# Replies recorded from a live mainnet node (`rpc.nano.to`, Nano V28.2) on
+# 2026-10-04. Re-fetch either with:
+#   curl -s -X POST https://rpc.nano.to -H 'Content-Type: application/json' \
+#     -d '{"action":"block_info","json_block":"true","hash":"<HASH>"}'
+# The point of recording them is that this defect was an assumption about these
+# shapes, so a mock written from the same assumption would have agreed with it.
+
+# A RECEIVE on a real account: money arriving. `block_account` is the account
+# the block belongs to - the receiver - and there is no payee anywhere in it.
+RECEIVE_REPLY = {
+    "block_account": "nano_1natrium1o3z5519ifou7xii8crpxpk8y65qmkih8e8bpsjri651oza8imdd",
+    "amount": "50000000000000000000000000000000",
+    "confirmed": "true",
+    "subtype": "receive",
+    "contents": {"type": "state",
+                 "link_as_account":
+                     "nano_1s7fdbg491z6eo64sz3ghjhxzpkgbn6baxznfy6eaeu8epwkmzpz9yc76c7f"},
+}
+RECEIVER = RECEIVE_REPLY["block_account"]
+
+# A LEGACY (pre-state) send, block 2 of the genesis account. It carries NO
+# `subtype` at all, names its kind in `contents.type`, and spells its payee
+# `contents.destination` - there is no `link_as_account`.
+LEGACY_SEND_REPLY = {
+    "block_account": "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3",
+    "amount": "3271945835778254456378601994536232802",
+    "confirmed": "true",
+    "contents": {"type": "send",
+                 "destination":
+                     "nano_13ezf4od79h1tgj9aiu4djzcmmguendtjfuhwfukhuucboua8cpoihmh8byo"},
+}
+LEGACY_SENDER = LEGACY_SEND_REPLY["block_account"]
+LEGACY_PAYEE = LEGACY_SEND_REPLY["contents"]["destination"]
+
+
+class RecordedNode(nanonode.NanoNode):
+    """Answers one recorded reply, through the real mapping."""
+
+    def __init__(self, reply):
+        self.reply = reply
+        self.calls = []
+
+    def block_info(self, block_hash):
+        self.calls.append(block_hash.upper())
+        return nanonode.read_block_info(self.reply)
+
+
+class OnlyASendIsAPayment(unittest.TestCase):
+    """A block that paid nobody is not a proof that somebody paid us.
+
+    Before this, `block_info` filled `destination` in from `block_account`
+    whenever the subtype was not exactly "send". On a receive that is OUR OWN
+    payout account, so a confirmed receive of at least the price verified - and
+    every receive hash is public in our account history. Any stranger could read
+    our ledger and be served for free, once per hash per resource.
+    """
+
+    def _verdict(self, node, pay_to, required=AMOUNT_RAW):
+        try:
+            return ("paid", _verify.verify(proof(), pay_to, required, RESOURCE,
+                                           node, _verify.ReplayGuard()))
+        except _verify.Unpaid as exc:
+            return ("unpaid", exc.reason)
+
+    def test_a_receive_on_our_own_account_is_not_a_payment(self):
+        node = fakenode.FakeNode()
+        node.received(BLOCK, AMOUNT_RAW * 100)
+        self.assertEqual(self._verdict(node, PAY_TO)[1], "not_a_send")
+
+    def test_a_recorded_receive_names_no_payee_at_all(self):
+        """The mapping, against the reply a real node actually sends."""
+        info = nanonode.read_block_info(RECEIVE_REPLY)
+        self.assertEqual(info["subtype"], "receive")
+        self.assertIsNone(info["destination"],
+                          "a receive has no payee, so none may be invented for it")
+        self.assertEqual(info["amount_raw"], 50 * 10 ** 30)
+
+    def test_a_recorded_receive_does_not_pay_the_account_it_credited(self):
+        """The whole hole, end to end: the receiver is the seller."""
+        self.assertEqual(self._verdict(RecordedNode(RECEIVE_REPLY), RECEIVER)[1],
+                          "not_a_send")
+
+    def test_a_change_block_is_refused_as_what_it_is(self):
+        """It was refused before too - as `underpaid`, because a change block
+        carries no amount. A reason that names the wrong problem sends an
+        operator reading their logs to the wrong place."""
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, None, 0, True, subtype="change")
+        self.assertEqual(self._verdict(node, PAY_TO)[1], "not_a_send")
+
+    def test_a_block_whose_kind_cannot_be_read_is_not_a_send(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW, True, subtype=None)
+        self.assertEqual(self._verdict(node, PAY_TO)[1], "not_a_send")
+
+
+class ALegacySendNamesItsOwnPayee(unittest.TestCase):
+    """A legacy block has no `subtype`, so it took the same wrong branch - and
+    there the invented payee was the SENDER. Both halves of that were wrong: a
+    legacy send out of our own payout account read as a payment to us, and a
+    legacy send that really did pay us was refused."""
+
+    def _verdict(self, pay_to):
+        try:
+            _verify.verify(proof(), pay_to, 10 ** 24, RESOURCE,
+                           RecordedNode(LEGACY_SEND_REPLY), _verify.ReplayGuard())
+            return "paid"
+        except _verify.Unpaid as exc:
+            return exc.reason
+
+    def test_the_payee_is_read_from_the_block_not_from_its_account(self):
+        info = nanonode.read_block_info(LEGACY_SEND_REPLY)
+        self.assertEqual(info["subtype"], "send")
+        self.assertEqual(info["destination"], LEGACY_PAYEE)
+        self.assertNotEqual(info["destination"], LEGACY_SENDER)
+
+    def test_a_legacy_send_out_of_our_account_is_not_a_payment_to_us(self):
+        self.assertEqual(self._verdict(LEGACY_SENDER), "wrong_destination")
+
+    def test_a_legacy_send_to_us_is_a_payment(self):
+        self.assertEqual(self._verdict(LEGACY_PAYEE), "paid")
+
+
+class OneAccountTwoSpellings(unittest.TestCase):
+    """`nano_` and the legacy `xrb_` are one account. A node is free to serve
+    either, and refusing a payment over the spelling costs the payer their
+    money and gets them nothing."""
+
+    def test_the_payee_may_be_written_the_legacy_way(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW)
+        payment = _verify.verify(proof(), "xrb_" + PAY_TO[5:], AMOUNT_RAW, RESOURCE,
+                                 node, _verify.ReplayGuard())
+        self.assertEqual(payment["block_hash"], BLOCK)
+
+    def test_the_node_may_spell_the_destination_the_legacy_way(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, "xrb_" + PAY_TO[5:], AMOUNT_RAW)
+        payment = _verify.verify(proof(), PAY_TO, AMOUNT_RAW, RESOURCE,
+                                 node, _verify.ReplayGuard())
+        self.assertEqual(payment["block_hash"], BLOCK)
+
+    def test_a_different_account_is_still_a_different_account(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, BURN, AMOUNT_RAW)
+        with self.assertRaises(_verify.Unpaid) as caught:
+            _verify.verify(proof(), PAY_TO, AMOUNT_RAW, RESOURCE,
+                           node, _verify.ReplayGuard())
+        self.assertEqual(caught.exception.reason, "wrong_destination")
+
+    def test_a_destination_that_is_not_an_address_is_equal_to_nothing(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, "not an address", AMOUNT_RAW)
+        with self.assertRaises(_verify.Unpaid) as caught:
+            _verify.verify(proof(), PAY_TO, AMOUNT_RAW, RESOURCE,
+                           node, _verify.ReplayGuard())
+        self.assertEqual(caught.exception.reason, "wrong_destination")
+
+    def test_a_misconfigured_payto_blames_the_seller_not_the_payer(self):
+        """`dual_rail()` refuses a bad payTo at construction, so this is only
+        reachable by calling `verify` directly - but when it is reached, the
+        reason must not read as though the payer paid the wrong account."""
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW)
+        with self.assertRaises(_verify.Unpaid) as caught:
+            _verify.verify(proof(), PAY_TO[:-1] + "1", AMOUNT_RAW, RESOURCE,
+                           node, _verify.ReplayGuard())
+        self.assertEqual(caught.exception.reason, "invalid_payto")
 
 
 if __name__ == "__main__":
