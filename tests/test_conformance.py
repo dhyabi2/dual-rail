@@ -131,6 +131,16 @@ def _declaration_cases():
         body.update(over)
         return {key: value for key, value in body.items() if value is not _DROP}
 
+    def resource(*entries, **over):
+        item = {"url": "https://a.dev/x", "accepts": list(entries)}
+        item.update(over)
+        return {key: value for key, value in item.items() if value is not _DROP}
+
+    def catalogue(*items, **over):
+        body = {"x402Version": 2, "resources": list(items)}
+        body.update(over)
+        return {key: value for key, value in body.items() if value is not _DROP}
+
     v1 = dict(entry(amount=_DROP), maxAmountRequired="0.0001",
               resource="https://example.dev/report", description="a rail")
     return [
@@ -186,6 +196,52 @@ def _declaration_cases():
         {"x402Version": 2, "accepts": "nope"},
         {"x402Version": 2},
         [], "nope", None, 7, {},
+        # Resource catalogues (issue #1). The shape
+        # extract.paypercall.dev/.well-known/x402 serves: no top-level
+        # accepts[], one accepts[] per resources[] item. Both bindings must
+        # read them identically, including the CHALLENGE_ONLY_FIELDS
+        # relaxation and which problems survive it.
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP))),
+        catalogue(resource(entry())),
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP)),
+                  resource(entry(maxTimeoutSeconds=_DROP), url="https://b.dev/x")),
+        # Relaxed only for `field_missing`: present and malformed still sinks it.
+        catalogue(resource(entry(maxTimeoutSeconds="60"))),
+        catalogue(resource(entry(maxTimeoutSeconds=0))),
+        # Everything a later 402 cannot repair is still fatal in a catalogue.
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP, payTo=PAY_TO[:-1] + "1"))),
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP, amount="0.0001"))),
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP, amount="9" * 40))),
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP, network="nano"))),
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP, asset="USDC"))),
+        # One bad resource among good ones must not be hidden by them.
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP)),
+                  resource(entry(maxTimeoutSeconds=_DROP, payTo=""),
+                           url="https://b.dev/x")),
+        # A USDC sibling in a catalogue: the same relaxation, or every
+        # catalogue would report sibling_entry_rejected on a correct rail.
+        catalogue(resource({"scheme": "exact", "network": "base",
+                            "asset": "USDC", "amount": "10000",
+                            "payTo": "0x" + "1" * 40},
+                           entry(maxTimeoutSeconds=_DROP))),
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP), url=_DROP)),
+        catalogue(resource(entry(maxTimeoutSeconds=_DROP), url="")),
+        # `resource` is the other spelling of a resources[] item's url.
+        {"x402Version": 2, "resources": [
+            {"resource": "https://a.dev/x", "accepts": [entry(maxTimeoutSeconds=_DROP)]}]},
+        catalogue(),
+        catalogue({"url": "https://a.dev/x"}),
+        catalogue({"url": "https://a.dev/x", "accepts": "nope"}),
+        catalogue(None, 5, resource(entry(maxTimeoutSeconds=_DROP))),
+        {"x402Version": 2, "resources": "nope"},
+        {"x402Version": 1, "resources": [
+            {"url": "https://a.dev/x", "accepts": [entry(maxTimeoutSeconds=_DROP)]}]},
+        {"resources": [{"url": "https://a.dev/x",
+                        "accepts": [entry(maxTimeoutSeconds=_DROP)]}]},
+        # A 402 challenge that ALSO lists resources is still a challenge: the
+        # array the payer was served is the one to judge.
+        {"x402Version": 2, "resource": {"url": "https://example.dev/report"},
+         "accepts": [entry()], "resources": [resource(entry())]},
     ]
 
 

@@ -922,6 +922,123 @@ class ReadsAMultiResourceManifest(unittest.TestCase):
             import shutil
             shutil.rmtree(directory)
 
+    # `check` was the half left open on dual-rail#1 after #4: `inspect` and
+    # `verify` learned this shape, the validator did not. It read the
+    # top-level `accepts`, found nothing, and reported `0 entries, 0 naming
+    # Nano, NOT payable` with exit 1 about a manifest carrying payable Nano
+    # entries - the one answer the module exists to prevent.
+
+    @staticmethod
+    def catalogue():
+        """A manifest in the live shape: `url`, no `maxTimeoutSeconds`.
+
+        Cut from `extract.paypercall.dev/.well-known/x402` as read 2026-10-08:
+        24 resources, every entry Nano-only, not one carrying
+        `maxTimeoutSeconds`, while a real 402 from the same resource carries
+        it. Both halves of that pair are measured in the PR body.
+        """
+        def entry(pay_to):
+            out = dict(_challenge.nano_entry(pay_to, AMOUNT, "https://x.dev/y"))
+            out.pop("maxTimeoutSeconds", None)
+            out.pop("resource", None)
+            out.pop("description", None)
+            return out
+        return {"x402Version": 2, "resources": [
+            {"url": "https://example.dev/extract", "accepts": [entry(BURN)]},
+            {"url": "https://example.dev/select", "accepts": [entry(BURN)]},
+        ]}
+
+    def test_check_reads_a_catalogue_instead_of_calling_it_empty(self):
+        directory = tempfile.mkdtemp()
+        try:
+            path = self._write(directory, self.catalogue())
+            code, out, _ = run_cli(["check", "--json", path])
+            report = json.loads(out)
+            self.assertEqual(report["document_kind"], "resource_catalogue")
+            self.assertEqual(report["entries"], 2)
+            self.assertEqual(report["resources_naming_nano"], 2)
+            self.assertEqual(report["resources_not_payable"], 0)
+            self.assertNotIn("accepts_not_an_array",
+                             {issue["code"] for issue in report["problems"]})
+            self.assertTrue(report["payable"])
+            self.assertEqual(code, 0)
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
+    def test_check_prints_each_resource_by_its_url(self):
+        directory = tempfile.mkdtemp()
+        try:
+            path = self._write(directory, self.catalogue())
+            code, out, _ = run_cli(["check", path])
+            self.assertEqual(code, 0)
+            self.assertIn("resource catalogue, 2 resource(s)", out)
+            self.assertIn("https://example.dev/extract", out)
+            self.assertIn("https://example.dev/select", out)
+            # The note is printed and does not count against the entry.
+            self.assertIn("(note) [challenge_only_field_absent]", out)
+            self.assertNotIn("accepts[] entries:     0", out)
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
+    def test_check_exits_1_and_names_the_one_broken_resource(self):
+        directory = tempfile.mkdtemp()
+        try:
+            document = self.catalogue()
+            document["resources"][1]["accepts"][0]["payTo"] = BURN[:-1] + "1"
+            path = self._write(directory, document)
+            code, out, _ = run_cli(["check", "--json", path])
+            self.assertEqual(code, 1)
+            report = json.loads(out)
+            self.assertEqual(report["resources_not_payable"], 1)
+            self.assertFalse(report["payable"])
+            self.assertTrue(report["resources"][0]["payable"])
+            self.assertFalse(report["resources"][1]["payable"])
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
+    def test_check_still_reports_an_ordinary_402_the_way_it_always_did(self):
+        directory = tempfile.mkdtemp()
+        try:
+            path = self._write(directory, {
+                "x402Version": 2, "resource": {"url": "https://x.dev/y"},
+                "accepts": [dict(_challenge.nano_entry(BURN, AMOUNT,
+                                                       "https://x.dev/y"))]})
+            code, out, _ = run_cli(["check", "--json", path])
+            self.assertEqual(code, 0)
+            report = json.loads(out)
+            self.assertEqual(report["document_kind"], "payment_required")
+            self.assertIn("nano_entries", report)
+            self.assertNotIn("multi_resource", report)
+            code, out, _ = run_cli(["check", path])
+            self.assertEqual(code, 0)
+            self.assertIn("accepts[] entries:     1", out)
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
+    def test_check_and_inspect_agree_on_how_many_resources_there_are(self):
+        """The two commands read the same document through different code.
+
+        `inspect` goes through `cli._resource_sections`, `check` through
+        `declaration.inspect`. Issue #1 is what their disagreement looked like.
+        """
+        directory = tempfile.mkdtemp()
+        try:
+            path = self._write(directory, self.catalogue())
+            _, inspected, _ = run_cli(["inspect", path])
+            _, checked, _ = run_cli(["check", "--json", path])
+            inspected, checked = json.loads(inspected), json.loads(checked)
+            self.assertEqual(inspected["entries"], checked["entries"])
+            self.assertEqual(len(inspected["resources"]), len(checked["resources"]))
+            self.assertEqual([r["resource_label"] for r in inspected["resources"]],
+                             [r["resource_label"] for r in checked["resources"]])
+        finally:
+            import shutil
+            shutil.rmtree(directory)
+
 # ------------------------------------------------------------------------------
 # Replies recorded from a live mainnet node (`rpc.nano.to`, Nano V28.2) on
 # 2026-10-04. Re-fetch either with:

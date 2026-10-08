@@ -82,6 +82,19 @@ V2_NON_EMPTY = ("scheme", "amount", "asset", "payTo")
 #: @x402/core's NetworkSchemaV2: z.string().min(3).refine(v => v.includes(':')).
 V2_NETWORK_MIN_LENGTH = 3
 
+#: Fields the x402 PaymentRequirements schema requires of a payment
+#: requirement, but which a RESOURCE CATALOGUE entry is not expected to carry,
+#: because the payer is handed them by the endpoint's own 402 response rather
+#: than by the catalogue. Measured against the live pair on 2026-10-08:
+#: `extract.paypercall.dev/.well-known/x402` omits all three on all 24 of its
+#: entries, while a real 402 from the same resource carries
+#: ``maxTimeoutSeconds: 60`` and a top-level ``resource`` object. Reporting
+#: their absence against a catalogue would be a false alarm of exactly the kind
+#: #4 removed from `verify` - the tool telling a seller its working rail is
+#: broken. A field that is PRESENT and malformed is still a problem: this
+#: relaxes only `field_missing`.
+CHALLENGE_ONLY_FIELDS = ("maxTimeoutSeconds", "resource", "description")
+
 
 def _problem(code, field, message):
     return {"code": code, "field": field, "message": message}
@@ -323,13 +336,43 @@ def nano_problems(entry, version) -> dict:
     return out
 
 
-def check_entry(entry, version) -> dict:
+def split_challenge_only(problems) -> tuple:
+    """(fatal, advertisement_only) over one entry's shape problems.
+
+    `shape_problems` stays exactly equivalent to @x402/core and is not touched
+    by this - the split happens one layer up, so the cross-check in
+    `tests/cross_check_x402_core.js` keeps measuring the same function. Only a
+    `field_missing` on a `CHALLENGE_ONLY_FIELDS` field moves: a field that is
+    present and malformed stays fatal, because no later 402 repairs it.
+    """
+    fatal, advertised = [], []
+    for issue in problems:
+        if issue["code"] == "field_missing" and issue["field"] in CHALLENGE_ONLY_FIELDS:
+            advertised.append(_problem(
+                "challenge_only_field_absent", issue["field"],
+                "%s is absent. In a 402 challenge the x402 schema requires it, but "
+                "this is a resource catalogue: the payer reads %s off the "
+                "endpoint's own 402 response, not off the catalogue entry. Not "
+                "counted against this entry"
+                % (issue["field"], issue["field"])))
+        else:
+            fatal.append(issue)
+    return fatal, advertised
+
+
+def check_entry(entry, version, catalogue=False) -> dict:
     """One accepts[] entry against one x402 version. Never raises.
 
     `payable` is true only when both halves pass: an entry a client of that
     version would accept AND a payment a Nano node could actually settle.
+
+    `catalogue` says the entry came out of a `resources[]` item rather than a
+    402 challenge, which relaxes `CHALLENGE_ONLY_FIELDS` and nothing else.
     """
     shape = shape_problems(entry, version)
+    advertised = []
+    if catalogue:
+        shape, advertised = split_challenge_only(shape)
     nano = nano_problems(entry, version) if isinstance(entry, dict) else \
         {"problems": [], "amount": None, "pay_to": None}
     verdict = {
@@ -337,6 +380,8 @@ def check_entry(entry, version) -> dict:
         "problems": shape + nano["problems"],
         "network": _network.classify(entry.get("network") if isinstance(entry, dict) else None),
     }
+    if advertised:
+        verdict["advertisement_only"] = advertised
     if nano["amount"] is not None:
         verdict["amount"] = nano["amount"]
     if nano["pay_to"] is not None:
@@ -386,60 +431,32 @@ def declared_version(challenge) -> int:
     return value if value in (1, 2) else 0
 
 
-def inspect(challenge) -> dict:
-    """A whole 402 challenge. Never raises. JSON-serialisable.
+def _accepts_report(accepts, versions, resource_url=None, catalogue=False) -> dict:
+    """A report over ONE accepts[] array - the shape every client actually reads.
 
-    Reports every Nano-family entry - including one spelled a way this
-    package's own `find_nano` would miss, which is how a seller ends up with
-    two Nano entries and two payout addresses in one array - and every sibling
-    entry that would sink the document our entry is in.
+    Shared by the single-challenge and the catalogue paths so the two cannot
+    drift: a seller running `check` on a manifest and on that resource's own
+    402 must get the same verdict about the same entry.
+
+    `resource_url` is the v2 resource url this array belongs to, already read
+    off whichever place the document keeps it. `catalogue` relaxes
+    `CHALLENGE_ONLY_FIELDS`; see `split_challenge_only`.
     """
-    report = {"x402_version": declared_version(challenge), "problems": [],
-              "entries": 0, "nano_entries": [], "payable": False}
+    report = {"problems": [], "entries": len(accepts), "nano_entries": [],
+              "payable": False}
+    if resource_url is not None:
+        report["resource_url"] = resource_url
     problems = report["problems"]
 
-    if not isinstance(challenge, dict):
-        problems.append(_problem("not_an_object", "",
-                                 "a 402 challenge must be a JSON object, got %s"
-                                 % kind(challenge)))
-        return report
-
-    if report["x402_version"] == 0:
-        problems.append(_problem(
-            "x402_version_missing_or_unknown", "x402Version",
-            "x402Version must be the number 1 or 2; got %s. @x402/core "
-            "discriminates its union on this field, so a document without it is "
-            "rejected whole, before any entry is read"
-            % show(challenge.get("x402Version"))))
-
-    accepts = challenge.get("accepts")
-    if not isinstance(accepts, list):
-        problems.append(_problem("accepts_not_an_array", "accepts",
-                                 "accepts must be an array of entries; got %s"
-                                 % kind(accepts)))
-        return report
     if not accepts:
         problems.append(_problem("accepts_empty", "accepts",
                                  "accepts is empty; both versions require at least one entry"))
-    report["entries"] = len(accepts)
-
-    if report["x402_version"] == 2:
-        resource = challenge.get("resource")
-        if not isinstance(resource, dict) or not _is_non_empty_string(resource.get("url")):
-            problems.append(_problem(
-                "v2_resource_missing", "resource",
-                "x402 v2 requires a top-level resource object with a non-empty url "
-                "(@x402/core's ResourceInfoSchema). Without it the whole document "
-                "fails, however good the entries are"))
-
-    # Checked against the version the document declares - and against both when
-    # it declares neither, since either kind of client may arrive.
-    versions = (report["x402_version"],) if report["x402_version"] else (1, 2)
 
     for index, entry in enumerate(accepts):
         net = _network.classify(entry.get("network") if isinstance(entry, dict) else None)
         if net["nano"]:
-            checks = {str(version): check_entry(entry, version) for version in versions}
+            checks = {str(version): check_entry(entry, version, catalogue)
+                      for version in versions}
             report["nano_entries"].append({
                 "index": index,
                 "network_as_given": entry.get("network") if isinstance(entry, dict) else None,
@@ -453,6 +470,8 @@ def inspect(challenge) -> dict:
         # out as one, so a sibling the schema rejects takes our entry with it.
         for version in versions:
             sibling = shape_problems(entry, version)
+            if catalogue:
+                sibling, _ = split_challenge_only(sibling)
             if sibling:
                 problems.append(_problem(
                     "sibling_entry_rejected", "accepts[%d]" % index,
@@ -476,4 +495,159 @@ def inspect(challenge) -> dict:
 
     report["payable"] = (not problems
                          and any(entry["payable"] for entry in report["nano_entries"]))
+    return report
+
+
+def inspect(challenge) -> dict:
+    """A whole 402 challenge, or a whole resource catalogue. Never raises.
+
+    Reports every Nano-family entry - including one spelled a way this
+    package's own `find_nano` would miss, which is how a seller ends up with
+    two Nano entries and two payout addresses in one array - and every sibling
+    entry that would sink the document our entry is in.
+
+    Two document shapes, told apart by which array is present:
+
+    * a **402 challenge**, with a top-level `accepts[]`. The report keeps the
+      shape it has always had.
+    * a **resource catalogue**, with `resources[]`, each item carrying its own
+      `url` and its own `accepts[]` - the shape
+      `extract.paypercall.dev/.well-known/x402` serves for 24 endpoints. Until
+      now this read as `accepts must be an array of entries; got null`
+      (issue #1), so `check` said nothing at all about entries that were
+      there: 0 entries, 0 naming Nano, not payable. A catalogue is reported
+      one resource at a time, because its arrays are separate documents to
+      every client that reads them and flattening them would invent an
+      accepts[] no client ever sees.
+
+    A catalogue report carries `multi_resource` and `resources`, and
+    deliberately carries NO top-level `nano_entries`: an empty list there is
+    the false answer this fix exists to remove, so a consumer written for the
+    challenge shape raises instead of reading "none".
+
+    One thing a catalogue is NOT: a document @x402/core models.
+    `PaymentRequiredSchema.safeParse` on the live manifest fails for want of
+    `resource` and `accepts` (measured 2026-10-08), so the equivalence claim
+    in `shape_problems` is about the ENTRIES, which are PaymentRequirements
+    either way, and not about the catalogue around them.
+    """
+    report = {"x402_version": declared_version(challenge),
+              "document_kind": "payment_required", "problems": [],
+              "entries": 0, "nano_entries": [], "payable": False}
+    problems = report["problems"]
+
+    if not isinstance(challenge, dict):
+        problems.append(_problem("not_an_object", "",
+                                 "a 402 challenge must be a JSON object, got %s"
+                                 % kind(challenge)))
+        return report
+
+    if report["x402_version"] == 0:
+        problems.append(_problem(
+            "x402_version_missing_or_unknown", "x402Version",
+            "x402Version must be the number 1 or 2; got %s. @x402/core "
+            "discriminates its union on this field, so a document without it is "
+            "rejected whole, before any entry is read"
+            % show(challenge.get("x402Version"))))
+
+    # Checked against the version the document declares - and against both when
+    # it declares neither, since either kind of client may arrive.
+    versions = (report["x402_version"],) if report["x402_version"] else (1, 2)
+
+    accepts = challenge.get("accepts")
+    if not isinstance(accepts, list):
+        # A catalogue only when there is no top-level accepts[] at all: a 402
+        # challenge that also lists resources is still a challenge, and the
+        # array the payer was served is the one to judge.
+        if isinstance(challenge.get("resources"), list):
+            return _catalogue(challenge, report, versions)
+        problems.append(_problem("accepts_not_an_array", "accepts",
+                                 "accepts must be an array of entries; got %s"
+                                 % kind(accepts)))
+        return report
+
+    report["entries"] = len(accepts)
+
+    if report["x402_version"] == 2:
+        resource = challenge.get("resource")
+        if not isinstance(resource, dict) or not _is_non_empty_string(resource.get("url")):
+            problems.append(_problem(
+                "v2_resource_missing", "resource",
+                "x402 v2 requires a top-level resource object with a non-empty url "
+                "(@x402/core's ResourceInfoSchema). Without it the whole document "
+                "fails, however good the entries are"))
+
+    inner = _accepts_report(accepts, versions)
+    problems.extend(inner["problems"])
+    report["nano_entries"] = inner["nano_entries"]
+    report["payable"] = not problems and any(entry["payable"]
+                                             for entry in report["nano_entries"])
+    return report
+
+
+def _resource_url(item):
+    """A `resources[]` item's url, under either spelling.
+
+    The live manifest uses `url`; `resource` is what a v1 entry calls the same
+    thing, and `cli._resource_sections` already reads both for the label.
+    """
+    for field in ("url", "resource"):
+        if _is_non_empty_string(item.get(field)):
+            return item[field]
+    return None
+
+
+def _catalogue(challenge, report, versions) -> dict:
+    """The `resources[]` form. `report` already carries the version verdict."""
+    problems = report["problems"]
+    report["document_kind"] = "resource_catalogue"
+    report["multi_resource"] = True
+    # An empty list here is a false answer for a catalogue; see `inspect`.
+    report.pop("nano_entries")
+    report["resources"] = []
+
+    items = challenge["resources"]
+    if not items:
+        problems.append(_problem(
+            "resources_empty", "resources",
+            "resources is empty; a catalogue with no resources advertises nothing"))
+
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            problems.append(_problem(
+                "resource_not_an_object", "resources[%d]" % index,
+                "a resources[] item must be a JSON object, got %s" % kind(item)))
+            continue
+        url = _resource_url(item)
+        section = {"index": index, "resource_label": url or "resources[%d]" % index}
+        if url is None:
+            problems.append(_problem(
+                "resource_url_missing", "resources[%d]" % index,
+                "resources[%d] has no non-empty url, so nothing in this catalogue "
+                "says which endpoint its accepts[] prices. An agent reading the "
+                "catalogue cannot reach it" % index))
+        accepts = item.get("accepts")
+        if not isinstance(accepts, list):
+            section.update({"entries": 0, "nano_entries": [], "payable": False,
+                            "problems": [_problem(
+                                "accepts_not_an_array", "resources[%d].accepts" % index,
+                                "accepts must be an array of entries; got %s"
+                                % kind(accepts))]})
+            report["resources"].append(section)
+            continue
+        section.update(_accepts_report(accepts, versions, resource_url=url,
+                                       catalogue=True))
+        report["resources"].append(section)
+
+    report["entries"] = sum(section["entries"] for section in report["resources"])
+    naming_nano = [section for section in report["resources"]
+                   if section["nano_entries"]]
+    report["resources_naming_nano"] = len(naming_nano)
+    report["resources_not_payable"] = sum(1 for section in naming_nano
+                                          if not section["payable"])
+    # `payable` is "a payer would pay every Nano resource in this catalogue",
+    # not "at least one": a catalogue of 24 endpoints with one broken entry is
+    # a seller problem, and an `any` would hide it behind the 23 that work.
+    report["payable"] = (not problems and bool(naming_nano)
+                         and all(section["payable"] for section in naming_nano))
     return report

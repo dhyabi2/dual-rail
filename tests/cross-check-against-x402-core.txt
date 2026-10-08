@@ -54,3 +54,16 @@ found by this script and neither by hand:
 To re-run after an @x402/core release, install that version instead and
 replace this file. A mismatch here is a real finding either way: the schema
 moved, or the validator was wrong.
+
+Re-run 2026-10-08 after the resource-catalogue change (`check` reading
+`resources[]`, issue #1's last item), at the same six seeds and with the
+script unchanged:
+
+    npm install --no-save @x402/core@2.28.0
+    for s in 1 2 3 7 11 2026; do node tests/cross_check_x402_core.js 20000 $s; done
+
+Every line came back BYTE-IDENTICAL to the capture above - same acceptance
+counts, 20000/20000 agreement at each seed. That is the point of re-running it:
+`shape_problems` is the cross-checked function and the catalogue relaxation
+deliberately does not touch it, so a change in these numbers would have meant
+the relaxation had leaked into the equivalence claim. It had not.

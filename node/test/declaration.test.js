@@ -211,3 +211,111 @@ test('22. nothing throws on any shape, and every report is JSON', () => {
     JSON.parse(JSON.stringify(report));
   }
 });
+
+// ---------------------------------------------------------------------------
+// The resource catalogue (dual-rail#1's last item). The conformance matrix
+// already holds the two bindings to identical verdicts over 23 catalogue
+// cases, so these cover what is specific to THIS binding: `delete` where
+// Python has `pop`, `Array.isArray` where Python has `isinstance`, and the
+// gap between an absent key and one set to `undefined`, which Python's dicts
+// do not have.
+
+const CATALOGUE_ENTRY = {
+  scheme: 'exact', network: 'nano:mainnet', asset: 'XNO',
+  amount: '100000000000000000000000000', payTo: OURS,
+};
+
+function catalogue(...items) {
+  return { x402Version: 2, resources: items };
+}
+
+function resourceItem(entries, over = {}) {
+  return Object.assign({ url: 'https://a.dev/x', accepts: entries }, over);
+}
+
+test('23. a catalogue is read instead of being called an absent accepts[]', () => {
+  const report = declaration.inspect(catalogue(resourceItem([CATALOGUE_ENTRY])));
+  assert.equal(report.document_kind, 'resource_catalogue');
+  assert.ok(!codes(report.problems).includes('accepts_not_an_array'));
+  assert.equal(report.entries, 1);
+  assert.equal(report.resources_naming_nano, 1);
+  assert.equal(report.payable, true);
+});
+
+test('24. `delete` really removes nano_entries, it does not set it undefined', () => {
+  // `'nano_entries' in report` is false for a deleted key and TRUE for one set
+  // to undefined - and an undefined key JSON.stringifys away, so a consumer
+  // reading the parsed report would see no difference while one reading the
+  // object in process would read `undefined.length` instead of throwing on a
+  // missing key. Python's `pop` cannot express the wrong one; JS can.
+  const report = declaration.inspect(catalogue(resourceItem([CATALOGUE_ENTRY])));
+  assert.equal('nano_entries' in report, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(report, 'nano_entries'), false);
+  assert.ok(!Object.keys(report).includes('nano_entries'));
+});
+
+test('25. a 402 challenge keeps its own shape, and keeps nano_entries', () => {
+  const report = declaration.inspect(doc([entry()]));
+  assert.equal(report.document_kind, 'payment_required');
+  assert.equal('nano_entries' in report, true);
+  assert.equal('resources' in report, false);
+  assert.equal('multi_resource' in report, false);
+});
+
+test('26. only an array of resources is a catalogue', () => {
+  for (const value of ['nope', 7, {}, null, undefined]) {
+    const report = declaration.inspect({ x402Version: 2, resources: value });
+    assert.equal(report.document_kind, 'payment_required', JSON.stringify(value));
+    assert.ok(codes(report.problems).includes('accepts_not_an_array'));
+  }
+});
+
+test('27. the relaxation moves field_missing and nothing else', () => {
+  const split = declaration.splitChallengeOnly([
+    { code: 'field_missing', field: 'maxTimeoutSeconds', message: '' },
+    { code: 'field_missing', field: 'payTo', message: '' },
+    { code: 'timeout_not_a_positive_number', field: 'maxTimeoutSeconds', message: '' },
+  ]);
+  assert.deepEqual(split.advertised.map((i) => i.field), ['maxTimeoutSeconds']);
+  assert.deepEqual(split.fatal.map((i) => i.code),
+                   ['field_missing', 'timeout_not_a_positive_number']);
+  // CHALLENGE_ONLY_FIELDS.includes is the membership test; a near-name is not
+  // a member, where a looser check (a substring, a startsWith) would pass it.
+  const near = declaration.splitChallengeOnly([
+    { code: 'field_missing', field: 'maxTimeoutSecond', message: '' },
+    { code: 'field_missing', field: 'descriptions', message: '' },
+  ]);
+  assert.equal(near.advertised.length, 0);
+  assert.equal(near.fatal.length, 2);
+});
+
+test('28. a present-but-malformed challenge-only field is still fatal', () => {
+  for (const bad of ['60', 0, true, -1]) {
+    const report = declaration.inspect(catalogue(resourceItem(
+      [Object.assign({}, CATALOGUE_ENTRY, { maxTimeoutSeconds: bad })])));
+    assert.equal(report.payable, false, JSON.stringify(bad));
+  }
+});
+
+test('29. one broken resource is not hidden by the ones that work', () => {
+  const report = declaration.inspect(catalogue(
+    resourceItem([CATALOGUE_ENTRY]),
+    resourceItem([Object.assign({}, CATALOGUE_ENTRY, { payTo: '' })],
+                 { url: 'https://b.dev/x' }),
+    resourceItem([CATALOGUE_ENTRY], { url: 'https://c.dev/x' })));
+  assert.equal(report.resources_naming_nano, 3);
+  assert.equal(report.resources_not_payable, 1);
+  assert.equal(report.payable, false);
+});
+
+test('30. nothing throws on any catalogue shape, and every report is JSON', () => {
+  for (const value of [catalogue(), catalogue(null, 5, 'x'),
+                       catalogue({ url: 'https://a.dev/x' }),
+                       catalogue({ url: 'https://a.dev/x', accepts: 'nope' }),
+                       catalogue(resourceItem([CATALOGUE_ENTRY], { url: undefined })),
+                       { resources: [resourceItem([CATALOGUE_ENTRY])] }]) {
+    const report = declaration.inspect(value);
+    assert.equal(report.payable, false, JSON.stringify(value));
+    JSON.parse(JSON.stringify(report));
+  }
+});
