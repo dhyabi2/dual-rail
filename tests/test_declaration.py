@@ -386,3 +386,259 @@ class AmountGrammar(unittest.TestCase):
 
 if __name__ == "__main__":                                   # pragma: no cover
     unittest.main()
+
+
+class ResourceCatalogue(unittest.TestCase):
+    """`check` was blind to a multi-resource manifest - issue #1's last item.
+
+    `inspect` and `verify` learned the `resources[]` shape in #4; the path
+    `check` uses, `declaration.inspect`, did not. It read
+    `challenge.get("accepts")`, found nothing, and reported `0 entries, 0
+    naming Nano, not payable` about a document carrying 24 payable Nano
+    entries - the one answer the module exists to prevent, since from the
+    seller's side "not payable" and "nobody wants XNO" look identical.
+
+    The live shape these cases are cut from is
+    `extract.paypercall.dev/.well-known/x402`, read 2026-10-08: 24 resources,
+    each with its own `url` and `accepts[]`, every entry Nano-only, and not
+    one carrying `maxTimeoutSeconds` - while a real 402 from the same resource
+    carries `maxTimeoutSeconds: 60` and a top-level `resource` object. That
+    pair is what `CHALLENGE_ONLY_FIELDS` is measured against.
+    """
+
+    ENTRY = {"scheme": "exact", "network": "nano:mainnet", "asset": "XNO",
+             "amount": "100000000000000000000000000",
+             "payTo": "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3"}
+
+    def catalogue(self, *items, **over):
+        body = {"x402Version": 2, "resources": list(items)}
+        body.update(over)
+        return body
+
+    def item(self, *entries, **over):
+        out = {"url": "https://a.dev/x", "accepts": list(entries)}
+        out.update(over)
+        return out
+
+    # ---------------------------------------------------- the defect itself
+
+    def test_a_catalogue_is_no_longer_read_as_an_absent_accepts_array(self):
+        report = declaration.inspect(self.catalogue(self.item(self.ENTRY)))
+        self.assertEqual(report["document_kind"], "resource_catalogue")
+        codes = {issue["code"] for issue in report["problems"]}
+        self.assertNotIn("accepts_not_an_array", codes)
+        self.assertEqual(report["entries"], 1)
+        self.assertEqual(report["resources_naming_nano"], 1)
+        self.assertTrue(report["payable"])
+
+    def test_the_entries_a_catalogue_carries_are_actually_reported(self):
+        report = declaration.inspect(self.catalogue(
+            self.item(self.ENTRY),
+            self.item(self.ENTRY, url="https://b.dev/x")))
+        self.assertEqual(report["entries"], 2)
+        self.assertEqual([section["resource_label"] for section in report["resources"]],
+                         ["https://a.dev/x", "https://b.dev/x"])
+        for section in report["resources"]:
+            self.assertEqual(len(section["nano_entries"]), 1)
+            self.assertTrue(section["payable"])
+
+    def test_a_catalogue_report_carries_no_top_level_nano_entries(self):
+        """An empty list there is the false answer this fix removes.
+
+        A consumer written for the challenge shape must raise rather than read
+        `[]` as "this catalogue names no Nano entry".
+        """
+        report = declaration.inspect(self.catalogue(self.item(self.ENTRY)))
+        self.assertNotIn("nano_entries", report)
+        with self.assertRaises(KeyError):
+            report["nano_entries"]
+
+    def test_a_402_challenge_keeps_the_shape_it_has_always_had(self):
+        report = declaration.inspect(v2_doc())
+        self.assertEqual(report["document_kind"], "payment_required")
+        self.assertIn("nano_entries", report)
+        self.assertNotIn("resources", report)
+        self.assertNotIn("multi_resource", report)
+
+    def test_a_challenge_that_also_lists_resources_is_still_a_challenge(self):
+        """The array the payer was served is the one to judge."""
+        body = v2_doc()
+        body["resources"] = [self.item(dict(self.ENTRY, payTo=""))]
+        report = declaration.inspect(body)
+        self.assertEqual(report["document_kind"], "payment_required")
+        self.assertTrue(report["payable"])
+
+    # ------------------------------------- what the relaxation does and does not
+
+    def test_a_missing_challenge_only_field_is_a_note_not_a_problem(self):
+        report = declaration.inspect(self.catalogue(self.item(self.ENTRY)))
+        check = report["resources"][0]["nano_entries"][0]["checks"]["2"]
+        self.assertEqual(check["problems"], [])
+        self.assertTrue(check["payable"])
+        self.assertEqual([issue["field"] for issue in check["advertisement_only"]],
+                         ["maxTimeoutSeconds"])
+        self.assertEqual(check["advertisement_only"][0]["code"],
+                         "challenge_only_field_absent")
+
+    def test_the_same_entry_in_a_402_challenge_is_still_unpayable(self):
+        """The relaxation is about the document, not about the entry.
+
+        Hand the identical entry to `check_entry` as a challenge entry and
+        `maxTimeoutSeconds` is fatal again - which is what @x402/core 2.28.0's
+        PaymentRequirementsV2Schema says, and what a facilitator will say.
+        """
+        verdict = declaration.check_entry(self.ENTRY, 2)
+        self.assertFalse(verdict["payable"])
+        self.assertEqual([issue["field"] for issue in verdict["problems"]],
+                         ["maxTimeoutSeconds"])
+        self.assertNotIn("advertisement_only", verdict)
+
+    def test_a_present_but_malformed_challenge_only_field_is_still_fatal(self):
+        """Relaxed for `field_missing` only. `"60"` is a string, which zod refuses."""
+        for bad in ("60", 0, True, -1):
+            report = declaration.inspect(self.catalogue(
+                self.item(dict(self.ENTRY, maxTimeoutSeconds=bad))))
+            check = report["resources"][0]["nano_entries"][0]["checks"]["2"]
+            self.assertFalse(check["payable"], repr(bad))
+            self.assertEqual([issue["code"] for issue in check["problems"]],
+                             ["timeout_not_a_positive_number"], repr(bad))
+            self.assertFalse(report["payable"], repr(bad))
+
+    def test_everything_a_later_402_cannot_repair_is_still_fatal(self):
+        """A price, a destination or a network is the catalogue's own claim.
+
+        None of these is a field the endpoint's 402 supplies later, so none is
+        relaxed: a bad checksum means money sent there is unspendable however
+        the challenge is spelled.
+        """
+        pay_to = self.ENTRY["payTo"]
+        for over in ({"payTo": pay_to[:-1] + "1"}, {"payTo": ""},
+                     {"amount": "0.0001"}, {"amount": "9" * 40},
+                     {"network": "nano"}, {"network": "nano:testnet"},
+                     {"asset": "USDC"}, {"scheme": "upto"}):
+            report = declaration.inspect(self.catalogue(
+                self.item(dict(self.ENTRY, **over))))
+            self.assertFalse(report["payable"], repr(over))
+
+    def test_a_usdc_sibling_without_a_timeout_does_not_sink_the_catalogue(self):
+        """Otherwise every real catalogue reports a correct rail as broken.
+
+        This is the same false alarm #4 took out of `verify`: telling a seller
+        the USDC rail they already had has stopped working.
+        """
+        usdc = {"scheme": "exact", "network": "eip155:8453", "asset": "USDC",
+                "amount": "10000", "payTo": "0x" + "1" * 40}
+        report = declaration.inspect(self.catalogue(
+            self.item(usdc, self.ENTRY)))
+        self.assertEqual(report["problems"], [])
+        self.assertEqual(report["resources"][0]["problems"], [])
+        self.assertTrue(report["payable"])
+
+    def test_a_malformed_usdc_sibling_still_sinks_the_resource(self):
+        usdc = {"scheme": "exact", "network": "eip155:8453", "asset": "USDC",
+                "amount": "10000", "payTo": "0x" + "1" * 40, "maxTimeoutSeconds": "60"}
+        report = declaration.inspect(self.catalogue(self.item(usdc, self.ENTRY)))
+        codes = {issue["code"] for issue in report["resources"][0]["problems"]}
+        self.assertIn("sibling_entry_rejected", codes)
+        self.assertFalse(report["payable"])
+
+    # ------------------------------------------------- the catalogue's own shape
+
+    def test_one_broken_resource_is_not_hidden_by_the_ones_that_work(self):
+        """`payable` is every Nano resource, not any.
+
+        A catalogue of 24 endpoints with one bad entry is a seller problem, and
+        an `any` would report it as healthy on the strength of the other 23.
+        """
+        report = declaration.inspect(self.catalogue(
+            self.item(self.ENTRY),
+            self.item(dict(self.ENTRY, payTo=""), url="https://b.dev/x"),
+            self.item(self.ENTRY, url="https://c.dev/x")))
+        self.assertEqual(report["resources_naming_nano"], 3)
+        self.assertEqual(report["resources_not_payable"], 1)
+        self.assertFalse(report["payable"])
+
+    def test_a_resource_with_no_url_is_named(self):
+        report = declaration.inspect(self.catalogue(self.item(self.ENTRY, url=None)))
+        codes = {issue["code"] for issue in report["problems"]}
+        self.assertIn("resource_url_missing", codes)
+        self.assertFalse(report["payable"])
+        self.assertEqual(report["resources"][0]["resource_label"], "resources[0]")
+
+    def test_the_other_spelling_of_a_resources_item_url_is_read(self):
+        report = declaration.inspect(self.catalogue(
+            {"resource": "https://a.dev/x", "accepts": [self.ENTRY]}))
+        self.assertEqual(report["resources"][0]["resource_label"], "https://a.dev/x")
+        self.assertTrue(report["payable"])
+
+    def test_an_empty_catalogue_advertises_nothing(self):
+        report = declaration.inspect(self.catalogue())
+        codes = {issue["code"] for issue in report["problems"]}
+        self.assertIn("resources_empty", codes)
+        self.assertFalse(report["payable"])
+
+    def test_a_catalogue_naming_no_nano_entry_is_not_payable(self):
+        usdc = {"scheme": "exact", "network": "eip155:8453", "asset": "USDC",
+                "amount": "10000", "payTo": "0x" + "1" * 40}
+        report = declaration.inspect(self.catalogue(self.item(usdc)))
+        self.assertEqual(report["resources_naming_nano"], 0)
+        self.assertFalse(report["payable"])
+
+    def test_a_resource_item_that_is_not_an_object_is_named_and_skipped(self):
+        report = declaration.inspect(self.catalogue(None, 5, "x",
+                                                    self.item(self.ENTRY)))
+        codes = [issue["code"] for issue in report["problems"]]
+        self.assertEqual(codes.count("resource_not_an_object"), 3)
+        self.assertFalse(report["payable"])
+
+    def test_a_resource_whose_accepts_is_not_an_array_is_named(self):
+        report = declaration.inspect(self.catalogue(
+            {"url": "https://a.dev/x", "accepts": "nope"}))
+        section = report["resources"][0]
+        self.assertEqual([issue["code"] for issue in section["problems"]],
+                         ["accepts_not_an_array"])
+        self.assertEqual(section["entries"], 0)
+        self.assertFalse(report["payable"])
+
+    def test_resources_that_is_not_an_array_is_not_a_catalogue(self):
+        report = declaration.inspect({"x402Version": 2, "resources": "nope"})
+        self.assertEqual(report["document_kind"], "payment_required")
+        self.assertEqual([issue["code"] for issue in report["problems"]],
+                         ["accepts_not_an_array"])
+
+    def test_a_catalogue_declaring_no_version_is_checked_against_both(self):
+        report = declaration.inspect({"resources": [self.item(self.ENTRY)]})
+        checks = report["resources"][0]["nano_entries"][0]["checks"]
+        self.assertEqual(sorted(checks), ["1", "2"])
+        codes = {issue["code"] for issue in report["problems"]}
+        self.assertIn("x402_version_missing_or_unknown", codes)
+        self.assertFalse(report["payable"])
+
+    def test_a_v1_catalogue_relaxes_v1s_challenge_only_fields_too(self):
+        """v1 requires `resource` and `description` on the entry; a catalogue
+        keeps the url on the resources[] item and the description beside it."""
+        entry = dict(self.ENTRY,
+                     maxAmountRequired="100000000000000000000000000")
+        del entry["amount"]
+        report = declaration.inspect({"x402Version": 1,
+                                      "resources": [self.item(entry)]})
+        check = report["resources"][0]["nano_entries"][0]["checks"]["1"]
+        self.assertEqual(check["problems"], [])
+        self.assertEqual(sorted(issue["field"] for issue in check["advertisement_only"]),
+                         ["description", "maxTimeoutSeconds", "resource"])
+        self.assertTrue(report["payable"])
+
+    def test_the_whole_catalogue_report_is_json_serialisable(self):
+        json.dumps(declaration.inspect(self.catalogue(self.item(self.ENTRY))))
+
+    def test_split_challenge_only_moves_nothing_else(self):
+        problems = [
+            {"code": "field_missing", "field": "maxTimeoutSeconds", "message": ""},
+            {"code": "field_missing", "field": "payTo", "message": ""},
+            {"code": "timeout_not_a_positive_number",
+             "field": "maxTimeoutSeconds", "message": ""},
+        ]
+        fatal, advertised = declaration.split_challenge_only(problems)
+        self.assertEqual([issue["field"] for issue in advertised], ["maxTimeoutSeconds"])
+        self.assertEqual([issue["code"] for issue in fatal],
+                         ["field_missing", "timeout_not_a_positive_number"])

@@ -20,8 +20,8 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 109 tests, includes the Python/Node conformance run
-(cd node && npm test)                           # 67 tests
+python3 -m unittest discover -s tests          # 137 tests, includes the Python/Node conformance run
+(cd node && npm test)                           # 75 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
 
@@ -149,6 +149,7 @@ your endpoint rather than into either runtime.
 ```
 dual-rail inspect <manifest-url|file>       # read-only; prints the current rails
 dual-rail check   <manifest-url|file> [--json]   # read-only; would a client PAY the Nano entry?
+                                                 # reads a 402 challenge or a resources[] catalogue
 dual-rail add --manifest <url|file> --pay-to nano_… --amount 0.0001 [--out p.json|--diff]
 dual-rail verify <base-url> [--payment <block hash>] [--json]
 ```
@@ -219,6 +220,53 @@ And because a client parses the whole 402 or none of it, `check` reports a
 carrying `"network": "base"` in a document that says `x402Version: 2` fails
 `NetworkSchemaV2`, and the array your Nano entry sits in is thrown out with it.
 
+### Two document shapes, and the one that used to read as empty
+
+A **402 challenge** has a top-level `accepts[]`. A **resource catalogue** —
+what a seller serves at `/.well-known/x402` — has `resources[]`, each item
+carrying its own `url` and its own `accepts[]`. `check` read only the first
+shape and reported a catalogue as `accepts must be an array of entries; got
+null`: **0 entries, 0 naming Nano, not payable**, exit 1, about a document
+carrying payable Nano entries. From the seller's side that is the same thing as
+nobody wanting to pay in XNO, which is the confusion this whole command exists
+to end. It now reads both, one resource at a time — flattening them would
+invent an `accepts[]` no client ever sees and make an entry's index meaningless:
+
+```
+$ python3 cli.py check https://extract.paypercall.dev/.well-known/x402
+
+x402 version declared: 2
+document:              resource catalogue, 24 resource(s)
+accepts[] entries:     24 across all resources
+resources naming Nano: 24, of which not payable: 0
+```
+
+`payable` for a catalogue is **every** Nano resource, not any: a catalogue of 24
+endpoints with one unpayable entry is a seller problem, and an `any` would
+report it healthy on the strength of the other 23. `resources_not_payable` says
+how many, and each is printed under its own url.
+
+A catalogue entry is an **advertisement**, not a challenge, and the three
+fields the x402 schema requires that only a live 402 can supply —
+`maxTimeoutSeconds`, and v1's `resource` and `description` — are reported as a
+note rather than counted against it. Measured: the manifest above omits all
+three on all 24 entries, while a real 402 from the same resource carries
+`maxTimeoutSeconds: 60` and a top-level `resource` object. Reporting them as
+problems would be the same false alarm `verify` used to raise about a working
+USDC rail. The relaxation covers a **missing** field only — a
+`maxTimeoutSeconds` of `"60"` is still refused — and nothing a later 402
+cannot repair is relaxed at all: a bad checksum, a decimal amount, an amount
+over the 128-bit ceiling, a wrong asset, scheme or network still sink the
+entry.
+
+`shape_problems` itself is untouched by this, which is why the equivalence run
+above still reads 0 disagreements over 120,000 documents: the catalogue
+relaxation sits one layer up, in `split_challenge_only`. A catalogue is not a
+document `@x402/core` models — `PaymentRequiredSchema` rejects it for want of
+`resource` and `accepts` — so the equivalence claim is about the **entries**,
+which are `PaymentRequirements` in either shape, and not about the catalogue
+around them.
+
 ## Network identifiers: there is more than one
 
 `nano:mainnet` is the canonical spelling and the only one x402 v2 accepts.
@@ -253,10 +301,10 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 109 tests — OK
+Ran 137 tests — OK
 
 $ cd node && npm test
-# pass 67
+# pass 75
 
 $ python3 -m unittest tests.test_conformance
 ```

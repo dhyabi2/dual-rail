@@ -45,6 +45,16 @@ const V2_NON_EMPTY = ['scheme', 'amount', 'asset', 'payTo'];
 
 const V2_NETWORK_MIN_LENGTH = 3;
 
+// Fields the x402 PaymentRequirements schema requires of a payment
+// requirement, but which a RESOURCE CATALOGUE entry is not expected to carry,
+// because the payer is handed them by the endpoint's own 402 response rather
+// than by the catalogue. Measured against the live pair on 2026-10-08:
+// `extract.paypercall.dev/.well-known/x402` omits all three on all 24 of its
+// entries, while a real 402 from the same resource carries
+// `maxTimeoutSeconds: 60` and a top-level `resource` object. A field that is
+// PRESENT and malformed is still a problem: this relaxes only `field_missing`.
+const CHALLENGE_ONLY_FIELDS = ['maxTimeoutSeconds', 'resource', 'description'];
+
 function problem(code, field, message) {
   return { code, field, message };
 }
@@ -264,8 +274,37 @@ function nanoProblems(entry, version) {
   return out;
 }
 
-function checkEntry(entry, version) {
-  const shape = shapeProblems(entry, version);
+// (fatal, advertisementOnly) over one entry's shape problems. `shapeProblems`
+// stays exactly equivalent to @x402/core and is not touched by this - the split
+// happens one layer up, so the cross-check in tests/cross_check_x402_core.js
+// keeps measuring the same function. Only a `field_missing` on a
+// CHALLENGE_ONLY_FIELDS field moves: a field that is present and malformed
+// stays fatal, because no later 402 repairs it.
+function splitChallengeOnly(problems) {
+  const fatal = [];
+  const advertised = [];
+  for (const issue of problems) {
+    if (issue.code === 'field_missing' && CHALLENGE_ONLY_FIELDS.includes(issue.field)) {
+      advertised.push(problem('challenge_only_field_absent', issue.field,
+        `${issue.field} is absent. In a 402 challenge the x402 schema requires ` +
+        'it, but this is a resource catalogue: the payer reads ' +
+        `${issue.field} off the endpoint's own 402 response, not off the ` +
+        'catalogue entry. Not counted against this entry'));
+    } else {
+      fatal.push(issue);
+    }
+  }
+  return { fatal, advertised };
+}
+
+function checkEntry(entry, version, catalogue = false) {
+  let shape = shapeProblems(entry, version);
+  let advertised = [];
+  if (catalogue) {
+    const split = splitChallengeOnly(shape);
+    shape = split.fatal;
+    advertised = split.advertised;
+  }
   const nano = isObject(entry) ? nanoProblems(entry, version)
                                : { problems: [], amount: null, pay_to: null };
   const verdict = {
@@ -273,6 +312,7 @@ function checkEntry(entry, version) {
     problems: shape.concat(nano.problems),
     network: net.classify(isObject(entry) ? entry.network : null),
   };
+  if (advertised.length) verdict.advertisement_only = advertised;
   if (nano.amount !== null) verdict.amount = nano.amount;
   if (nano.pay_to !== null) verdict.pay_to = nano.pay_to;
   verdict.payable = verdict.problems.length === 0;
@@ -300,55 +340,28 @@ function declaredVersion(challenge) {
   return value === 1 || value === 2 ? value : 0;
 }
 
-function inspect(challenge) {
-  const report = { x402_version: declaredVersion(challenge), problems: [],
-                   entries: 0, nano_entries: [], payable: false };
+// A report over ONE accepts[] array - the shape every client actually reads.
+// Shared by the single-challenge and the catalogue paths so the two cannot
+// drift: a seller running `check` on a manifest and on that resource's own 402
+// must get the same verdict about the same entry.
+function acceptsReport(accepts, versions, resourceUrl = null, catalogue = false) {
+  const report = { problems: [], entries: accepts.length, nano_entries: [],
+                   payable: false };
+  if (resourceUrl !== null) report.resource_url = resourceUrl;
   const problems = report.problems;
 
-  if (!isObject(challenge)) {
-    problems.push(problem('not_an_object', '',
-      `a 402 challenge must be a JSON object, got ${kind(challenge)}`));
-    return report;
-  }
-
-  if (report.x402_version === 0) {
-    problems.push(problem('x402_version_missing_or_unknown', 'x402Version',
-      `x402Version must be the number 1 or 2; got ${show(challenge.x402Version)}. ` +
-      '@x402/core discriminates its union on this field, so a document without it is ' +
-      'rejected whole, before any entry is read'));
-  }
-
-  const accepts = challenge.accepts;
-  if (!Array.isArray(accepts)) {
-    problems.push(problem('accepts_not_an_array', 'accepts',
-      `accepts must be an array of entries; got ${kind(accepts)}`));
-    return report;
-  }
   if (accepts.length === 0) {
     problems.push(problem('accepts_empty', 'accepts',
       'accepts is empty; both versions require at least one entry'));
   }
-  report.entries = accepts.length;
-
-  if (report.x402_version === 2) {
-    const resource = challenge.resource;
-    if (!isObject(resource) || !isNonEmptyString(resource.url)) {
-      problems.push(problem('v2_resource_missing', 'resource',
-        'x402 v2 requires a top-level resource object with a non-empty url ' +
-        "(@x402/core's ResourceInfoSchema). Without it the whole document " +
-        'fails, however good the entries are'));
-    }
-  }
-
-  // Checked against the version the document declares - and against both when
-  // it declares neither, since either kind of client may arrive.
-  const versions = report.x402_version ? [report.x402_version] : [1, 2];
 
   accepts.forEach((entry, index) => {
     const network = net.classify(isObject(entry) ? entry.network : null);
     if (network.nano) {
       const checks = {};
-      for (const version of versions) checks[String(version)] = checkEntry(entry, version);
+      for (const version of versions) {
+        checks[String(version)] = checkEntry(entry, version, catalogue);
+      }
       report.nano_entries.push({
         index,
         network_as_given: isObject(entry) && entry.network !== undefined ? entry.network : null,
@@ -362,7 +375,8 @@ function inspect(challenge) {
     // Not ours, and still ours to report: the array is accepted or thrown out
     // as one, so a sibling the schema rejects takes our entry with it.
     for (const version of versions) {
-      const sibling = shapeProblems(entry, version);
+      let sibling = shapeProblems(entry, version);
+      if (catalogue) sibling = splitChallengeOnly(sibling).fatal;
       if (sibling.length) {
         const codes = [...new Set(sibling.map((issue) => issue.code))].sort();
         problems.push(problem('sibling_entry_rejected', `accepts[${index}]`,
@@ -390,7 +404,149 @@ function inspect(challenge) {
   return report;
 }
 
+// A `resources[]` item's url, under either spelling. The live manifest uses
+// `url`; `resource` is what a v1 entry calls the same thing.
+function resourceUrlOf(item) {
+  for (const field of ['url', 'resource']) {
+    if (isNonEmptyString(item[field])) return item[field];
+  }
+  return null;
+}
+
+// The `resources[]` form. `report` already carries the version verdict.
+function catalogueReport(challenge, report, versions) {
+  const problems = report.problems;
+  report.document_kind = 'resource_catalogue';
+  report.multi_resource = true;
+  // An empty list here is a false answer for a catalogue; see `inspect`.
+  delete report.nano_entries;
+  report.resources = [];
+
+  const items = challenge.resources;
+  if (items.length === 0) {
+    problems.push(problem('resources_empty', 'resources',
+      'resources is empty; a catalogue with no resources advertises nothing'));
+  }
+
+  items.forEach((item, index) => {
+    if (!isObject(item)) {
+      problems.push(problem('resource_not_an_object', `resources[${index}]`,
+        `a resources[] item must be a JSON object, got ${kind(item)}`));
+      return;
+    }
+    const url = resourceUrlOf(item);
+    const section = { index, resource_label: url || `resources[${index}]` };
+    if (url === null) {
+      problems.push(problem('resource_url_missing', `resources[${index}]`,
+        `resources[${index}] has no non-empty url, so nothing in this catalogue ` +
+        'says which endpoint its accepts[] prices. An agent reading the ' +
+        'catalogue cannot reach it'));
+    }
+    const accepts = item.accepts;
+    if (!Array.isArray(accepts)) {
+      Object.assign(section, {
+        entries: 0, nano_entries: [], payable: false,
+        problems: [problem('accepts_not_an_array', `resources[${index}].accepts`,
+          `accepts must be an array of entries; got ${kind(accepts)}`)],
+      });
+      report.resources.push(section);
+      return;
+    }
+    Object.assign(section, acceptsReport(accepts, versions, url, true));
+    report.resources.push(section);
+  });
+
+  report.entries = report.resources.reduce((sum, s) => sum + s.entries, 0);
+  const namingNano = report.resources.filter((s) => s.nano_entries.length > 0);
+  report.resources_naming_nano = namingNano.length;
+  report.resources_not_payable = namingNano.filter((s) => !s.payable).length;
+  // `payable` is "a payer would pay every Nano resource in this catalogue", not
+  // "at least one": a catalogue of 24 endpoints with one broken entry is a
+  // seller problem, and an `any` would hide it behind the 23 that work.
+  report.payable = problems.length === 0 && namingNano.length > 0 &&
+                   namingNano.every((s) => s.payable);
+  return report;
+}
+
+// A whole 402 challenge, or a whole resource catalogue. Never raises.
+//
+// Two document shapes, told apart by which array is present: a 402 challenge
+// with a top-level accepts[], which keeps the report shape it has always had;
+// and a resource catalogue with resources[], each item carrying its own `url`
+// and its own accepts[] - the shape extract.paypercall.dev/.well-known/x402
+// serves for 24 endpoints. Until now that read as `accepts must be an array of
+// entries; got null` (issue #1), so `check` said nothing at all about entries
+// that were there. A catalogue is reported one resource at a time, because its
+// arrays are separate documents to every client that reads them.
+//
+// A catalogue report carries `multi_resource` and `resources`, and deliberately
+// carries NO top-level `nano_entries`: an empty list there is the false answer
+// this fix exists to remove, so a consumer written for the challenge shape
+// throws instead of reading "none".
+//
+// One thing a catalogue is NOT: a document @x402/core models.
+// PaymentRequiredSchema.safeParse on the live manifest fails for want of
+// `resource` and `accepts` (measured 2026-10-08), so the equivalence claim in
+// `shapeProblems` is about the ENTRIES, which are PaymentRequirements either
+// way, and not about the catalogue around them.
+function inspect(challenge) {
+  const report = { x402_version: declaredVersion(challenge),
+                   document_kind: 'payment_required', problems: [],
+                   entries: 0, nano_entries: [], payable: false };
+  const problems = report.problems;
+
+  if (!isObject(challenge)) {
+    problems.push(problem('not_an_object', '',
+      `a 402 challenge must be a JSON object, got ${kind(challenge)}`));
+    return report;
+  }
+
+  if (report.x402_version === 0) {
+    problems.push(problem('x402_version_missing_or_unknown', 'x402Version',
+      `x402Version must be the number 1 or 2; got ${show(challenge.x402Version)}. ` +
+      '@x402/core discriminates its union on this field, so a document without it is ' +
+      'rejected whole, before any entry is read'));
+  }
+
+  // Checked against the version the document declares - and against both when
+  // it declares neither, since either kind of client may arrive.
+  const versions = report.x402_version ? [report.x402_version] : [1, 2];
+
+  const accepts = challenge.accepts;
+  if (!Array.isArray(accepts)) {
+    // A catalogue only when there is no top-level accepts[] at all: a 402
+    // challenge that also lists resources is still a challenge, and the array
+    // the payer was served is the one to judge.
+    if (Array.isArray(challenge.resources)) {
+      return catalogueReport(challenge, report, versions);
+    }
+    problems.push(problem('accepts_not_an_array', 'accepts',
+      `accepts must be an array of entries; got ${kind(accepts)}`));
+    return report;
+  }
+
+  report.entries = accepts.length;
+
+  if (report.x402_version === 2) {
+    const resource = challenge.resource;
+    if (!isObject(resource) || !isNonEmptyString(resource.url)) {
+      problems.push(problem('v2_resource_missing', 'resource',
+        'x402 v2 requires a top-level resource object with a non-empty url ' +
+        "(@x402/core's ResourceInfoSchema). Without it the whole document " +
+        'fails, however good the entries are'));
+    }
+  }
+
+  const inner = acceptsReport(accepts, versions);
+  problems.push(...inner.problems);
+  report.nano_entries = inner.nano_entries;
+  report.payable = problems.length === 0 &&
+                   report.nano_entries.some((entry) => entry.payable);
+  return report;
+}
+
 module.exports = { MAX_RAW, ASSET, SCHEME, TIMEOUT_FIELD, V1_REQUIRED, V2_REQUIRED,
                    V1_NON_EMPTY, V2_NON_EMPTY, AMOUNT_FIELD, V2_NETWORK_MIN_LENGTH,
-                   shapeProblems, amountReading, nanoProblems, checkEntry,
+                   CHALLENGE_ONLY_FIELDS,
+                   shapeProblems, splitChallengeOnly, amountReading, nanoProblems, checkEntry,
                    declaredVersion, inspect };

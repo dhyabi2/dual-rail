@@ -295,6 +295,26 @@ def _removals_are_only_reflow(removals) -> bool:
 
 # ------------------------------------------------------------------- check
 
+def _print_nano_entry(entry, indent="") -> None:
+    """One Nano entry's verdict, in the same words wherever it is reported.
+
+    `advertisement_only` is printed and does NOT count against the entry: in a
+    catalogue the payer reads those fields off the endpoint's own 402, so
+    reporting them as problems would be the false alarm issue #1's `verify`
+    half was fixed for.
+    """
+    print("\n%saccepts[%d]  network %s%s" % (
+        indent, entry["index"], json.dumps(entry["network_as_given"]),
+        "" if entry["canonical_network"] else "  (not read as mainnet)"))
+    for version, check in sorted(entry["checks"].items()):
+        print("%s  x402 v%s: %s" % (indent, version, "payable" if check["payable"]
+                                    else "%d problem(s)" % len(check["problems"])))
+        for issue in check["problems"]:
+            print("%s    [%s] %s" % (indent, issue["code"], issue["message"]))
+        for issue in check.get("advertisement_only", []):
+            print("%s    (note) [%s] %s" % (indent, issue["code"], issue["message"]))
+
+
 def cmd_check(args) -> int:
     """The declaration validator, pointed at a manifest.
 
@@ -320,19 +340,38 @@ def cmd_check(args) -> int:
 
     print("\ndual-rail check %s\n" % args.target)
     print("x402 version declared: %s" % (report["x402_version"] or "none"))
+
+    if report.get("multi_resource"):
+        # A resource catalogue. Its accepts[] arrays are separate documents to
+        # every client that reads them, so each resource is reported on its own
+        # rather than flattened into an index no client would recognise.
+        print("document:              resource catalogue, %d resource(s)"
+              % len(report["resources"]))
+        print("accepts[] entries:     %d across all resources" % report["entries"])
+        print("resources naming Nano: %d, of which not payable: %d\n"
+              % (report["resources_naming_nano"], report["resources_not_payable"]))
+        for issue in report["problems"]:
+            print("[document] %-34s %s" % (issue["field"] or "-", issue["message"]))
+        for section in report["resources"]:
+            if not section["nano_entries"] and not section["problems"]:
+                continue
+            print("\n%s" % section["resource_label"])
+            for issue in section["problems"]:
+                print("  [%s] %s" % (issue["code"], issue["message"]))
+            for entry in section["nano_entries"]:
+                _print_nano_entry(entry, indent="  ")
+        print("\ncheck: %s\n" % (
+            "payable - an x402 client would pay the Nano entry of every resource "
+            "in this catalogue" if report["payable"]
+            else "NOT payable as it stands"))
+        return EXIT_OK if report["payable"] else EXIT_FAIL
+
     print("accepts[] entries:     %d" % report["entries"])
     print("entries naming Nano:   %d\n" % len(report["nano_entries"]))
     for issue in report["problems"]:
         print("[document] %-34s %s" % (issue["field"] or "-", issue["message"]))
     for entry in report["nano_entries"]:
-        print("\naccepts[%d]  network %s%s" % (
-            entry["index"], json.dumps(entry["network_as_given"]),
-            "" if entry["canonical_network"] else "  (not read as mainnet)"))
-        for version, check in sorted(entry["checks"].items()):
-            print("  x402 v%s: %s" % (version, "payable" if check["payable"]
-                                      else "%d problem(s)" % len(check["problems"])))
-            for issue in check["problems"]:
-                print("    [%s] %s" % (issue["code"], issue["message"]))
+        _print_nano_entry(entry)
     print("\ncheck: %s\n" % ("payable - an x402 client of the declared version would "
                              "pay this Nano entry" if report["payable"]
                              else "NOT payable as it stands"))
