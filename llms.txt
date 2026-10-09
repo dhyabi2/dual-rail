@@ -3,7 +3,8 @@
 > Add Nano (XNO) as an extra payment option beside an existing USDC/x402 rail - never instead of it. Appends exactly one entry to a 402 response's accepts[] array, leaves existing entries byte-identical, and falls through to the existing rails on any Nano-side error.
 
 - Python (WSGI) and Node (Express) middleware, standard library only.
-- `cli.py inspect|add|verify`: read a manifest, emit an additive patch, and verify a live endpoint (7 checks, exit 0 only if both rails work).
+- `cli.py inspect|add|check|verify`: read a manifest, emit an additive patch, and verify a live endpoint (7 checks, exit 0 only if both rails work).
+- `cli.py verifiers [--json]`: who can validate an XNO (nano:mainnet) payment today, checked live - a public-node `block_info` read (no facilitator, no custodian) and gosuda/x402-facilitator's Nano section; unreachable is reported, never passed.
 - Verifies a payment by asking a Nano node (`block_info`) that the block is confirmed, pays the configured address, and covers the amount (integer raw, 1 XNO = 10^30 raw). One payment buys one call.
 - Holds no key and signs nothing.
 - Limits: in-memory replay guard; `nano:mainnet` is not yet an x402-spec network; no third-party production deployment yet.

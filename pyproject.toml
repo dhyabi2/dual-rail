@@ -16,4 +16,4 @@ dual-rail = "cli:main"
 
 [tool.setuptools]
 py-modules = ["adapter", "challenge", "declaration", "network", "verify", "money",
-              "nanoaddr", "nanonode", "cli", "fakenode", "testhost"]
+              "nanoaddr", "nanonode", "verifiers", "cli", "fakenode", "testhost"]
