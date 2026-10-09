@@ -20,7 +20,7 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 143 tests, includes the Python/Node conformance run
+python3 -m unittest discover -s tests          # 150 tests, includes the Python/Node conformance run
 (cd node && npm test)                           # 75 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
@@ -154,12 +154,30 @@ dual-rail check   <manifest-url|file> [--json]   # read-only; would a client PAY
                                                  # reads a 402 challenge or a resources[] catalogue
 dual-rail add --manifest <url|file> --pay-to nano_… --amount 0.0001 [--out p.json|--diff]
 dual-rail verify <base-url> [--payment <block hash>] [--json]
+dual-rail verifiers [--node <url>] [--json]      # who can validate an XNO payment today, checked live
 ```
 
 `add` exits **3** rather than emit a patch that removes or modifies a line it
 did not author — including on a YAML manifest, which cannot be re-rendered
 without rewriting lines, and where it tells you to use `--out` instead. Run on
 an already-patched manifest it exits 0 with `already_present` and emits nothing.
+
+## Who can validate an XNO payment today?
+
+```
+python3 cli.py verifiers [--json]
+```
+
+Checked live each run, never from a list: (1) a `block_info` read against a
+public Nano node (`https://rpc.nano.to` unless `--node`) - this is
+self-verification with no facilitator and no custodian, because the payer
+broadcasts its own signed send block and any node shows it to anyone; it is the
+read `verify.py` makes; (2) [gosuda/x402-facilitator](https://github.com/gosuda/x402-facilitator),
+whose main-branch README must still have a `### Nano` section naming
+`nano:mainnet` with `exact` ticked. It is reported `custodial: false` only while
+that section says the payer broadcasts its own block and the facilitator is
+read-only on the chain; otherwise `unknown`. A check that cannot be reached is
+reported unreachable, not passed. Exit 0 if at least one is confirmed, 1 if none.
 
 ## Would a client actually pay your Nano entry?
 
@@ -303,7 +321,7 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 143 tests — OK
+Ran 150 tests — OK
 
 $ cd node && npm test
 # pass 75

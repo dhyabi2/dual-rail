@@ -21,6 +21,12 @@
         the run: one payment buys one call, so verifying twice needs two
         payments. That is the replay protection working, not a broken rail.
 
+    dual-rail verifiers [--node URL] [--json]
+        Who can validate an XNO (nano:mainnet) payment today, checked live:
+        a public node read (no facilitator, no custodian) and any facilitator
+        whose published docs name a Nano scheme. Read-only. Exits 1 if none
+        could be confirmed from here.
+
 The verifier is the product; the middleware is the implementation detail.
 Until `verify` prints 7/7 against a real URL, the message that says "this
 is not a migration" is not sendable.
@@ -38,6 +44,7 @@ import challenge as _challenge
 import declaration
 import money
 import nanoaddr
+import verifiers as _verifiers
 
 EXIT_OK = 0
 EXIT_FAIL = 1
@@ -509,6 +516,32 @@ def _report(args, checks, rails_before, rails_after) -> int:
     return EXIT_OK if ok else EXIT_FAIL
 
 
+# ---------------------------------------------------------------- verifiers
+
+def cmd_verifiers(args, node=None, fetch=None) -> int:
+    report = _verifiers.report(node=node, node_url=args.node,
+                               fetch=fetch or _verifiers.fetch_text)
+    ok = report["confirmed_live"] > 0
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return EXIT_OK if ok else EXIT_FAIL
+    print("\ndual-rail verifiers  (who can validate an XNO nano:mainnet payment, checked now)\n")
+    for v in report["verifiers"]:
+        custody = {False: "no", True: "YES"}.get(v["custodial"], "unknown")
+        print("[%s] %s" % ("live" if v["confirmed_live"] else "----", v["name"]))
+        if v["kind"] == "self":
+            print("       node %s  reachable: %s" % (v["node"], str(v["reachable"]).lower()))
+            print("       holds funds: %s  (%s)" % (custody, v["how"]))
+        else:
+            print("       %s - %s" % (v["url"], v["what"]))
+            print("       Nano section: %s  network: %s  scheme: %s  holds funds: %s"
+                  % (str(v["nano_section_found"]).lower(), v["network"] or "-",
+                     v["scheme"] or "-", custody))
+        print("       %s" % v["detail"])
+    print("\nverifiers: %d confirmed live\n" % report["confirmed_live"])
+    return EXIT_OK if ok else EXIT_FAIL
+
+
 # ---------------------------------------------------------------------- main
 
 def build_parser():
@@ -538,6 +571,12 @@ def build_parser():
     verify.add_argument("--payment", help="a settled block hash to present as proof")
     verify.add_argument("--json", action="store_true")
     verify.set_defaults(fn=cmd_verify)
+
+    who = sub.add_parser("verifiers", help="who can validate an XNO payment today (live)")
+    who.add_argument("--node", default=_verifiers.DEFAULT_NODE,
+                     help="public Nano node to read (default %(default)s)")
+    who.add_argument("--json", action="store_true")
+    who.set_defaults(fn=cmd_verifiers)
     return parser
 
 
