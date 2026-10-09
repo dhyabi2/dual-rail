@@ -20,7 +20,7 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 137 tests, includes the Python/Node conformance run
+python3 -m unittest discover -s tests          # 143 tests, includes the Python/Node conformance run
 (cd node && npm test)                           # 75 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
@@ -60,6 +60,8 @@ account there.
 
 Same status code, same headers, same ordering, same `x-402-version`. One
 additional element at the end of `accepts[]`, and nothing else.
+
+One real `nano:mainnet` entry followed from the 402 to a confirmed block on the ledger, verified with no facilitator, is in [`docs/x402-nano-end-to-end.md`](docs/x402-nano-end-to-end.md).
 
 `maxAmountRequired` is in **raw**, the asset's atomic unit, which is what
 `extra.decimals: 30` declares it to be — 10\*\*30 raw to the XNO, so the
@@ -301,7 +303,7 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 137 tests — OK
+Ran 143 tests — OK
 
 $ cd node && npm test
 # pass 75
