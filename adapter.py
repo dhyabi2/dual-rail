@@ -193,6 +193,22 @@ def dual_rail(**options) -> DualRail:
 
 
 def _resource_of(environ) -> str:
-    scheme = environ.get("wsgi.url_scheme", "http")
-    host = environ.get("HTTP_HOST") or environ.get("SERVER_NAME", "")
-    return "%s://%s%s" % (scheme, host, environ.get("PATH_INFO", ""))
+    """The replay guard's key for this request: the path, and nothing a payer sends.
+
+    This string is the only thing that separates one purchase from another in
+    `ReplayGuard`, so whatever goes into it decides whether a block can be
+    spent twice. It was `scheme://host/path`, with the host taken from
+    `HTTP_HOST` - the payer's own `Host:` header - and the scheme from
+    `wsgi.url_scheme`, which behind a proxy is set from `X-Forwarded-Proto`,
+    also the payer's. A payer who had paid once could present the same
+    confirmed send again under any `Host:` it liked, land in a different
+    bucket of the guard and be served again for nothing: one payment, as many
+    calls as there are strings to send.
+
+    A `DualRail` carries one `payTo` and one price, so one instance is one
+    seller's, and the host says nothing about WHICH of that seller's resources
+    was bought. Only the path does. Keying on the path alone is strictly
+    coarser than the old key - any two requests that shared the old key share
+    this one - so it can refuse more and admit less, never the other way.
+    """
+    return environ.get("PATH_INFO", "") or "/"

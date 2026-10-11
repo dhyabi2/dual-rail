@@ -244,10 +244,26 @@ class DualRail {
   }
 }
 
+// The replay guard's key for this request: the path, and nothing a payer sends.
+//
+// This string is the only thing that separates one purchase from another in
+// `ReplayGuard`, so whatever goes into it decides whether a block can be spent
+// twice. It was `proto://host/path`, and BOTH of those came off the request:
+// `req.headers.host` and `req.headers['x-forwarded-proto']` are the payer's to
+// choose. A payer who had paid once could present the same confirmed send
+// again under any host it liked, land in a different bucket of the guard and
+// be served again for nothing: one payment, as many calls as there are strings
+// to send.
+//
+// A DualRail carries one payTo and one price, so one instance is one seller's,
+// and the host says nothing about WHICH of that seller's resources was bought.
+// Only the path does. Keying on the path alone is strictly coarser than the old
+// key - any two requests that shared the old key share this one - so it can
+// refuse more and admit less, never the other way. The Python binding's
+// `_resource_of` is the same change, and conformance.test.js holds the two to
+// the same matrix.
 function resourceOfRequest(req) {
-  const host = req.headers.host || '';
-  const proto = req.headers['x-forwarded-proto'] || (req.socket && req.socket.encrypted ? 'https' : 'http');
-  return `${proto}://${host}${(req.originalUrl || req.url || '').split('?')[0]}`;
+  return (req.originalUrl || req.url || '').split('?')[0] || '/';
 }
 
 function dualRail(options = {}) {
