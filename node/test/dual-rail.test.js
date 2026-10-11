@@ -507,3 +507,36 @@ test('a destination that is not an address is equal to nothing', async () => {
   node.settle(BLOCK, 'not an address', AMOUNT_RAW);
   assert.equal(await verdict(node, PAY_TO), 'wrong_destination');
 });
+
+test('the replay key is not the payer\'s to choose: another host or scheme buys nothing', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, PAY_TO, AMOUNT_RAW);
+  await withServer(serverFor(node), async (base) => {
+    const first = await fetch(base + '/report',
+      { headers: { host: 'example.dev', 'x-payment': proof() } });
+    assert.equal(first.status, 200);
+    const retries = [
+      { host: 'example.dev.', 'x-payment': proof() },
+      { host: 'EXAMPLE.DEV', 'x-payment': proof() },
+      { host: 'anything-at-all', 'x-payment': proof() },
+      { host: 'example.dev', 'x-forwarded-proto': 'https', 'x-payment': proof() },
+    ];
+    for (const headers of retries) {
+      const again = await fetch(base + '/report', { headers });
+      assert.equal(again.status, 402,
+        `block was served a second time with headers ${JSON.stringify(headers)}`
+        + ' - one payment, two calls');
+    }
+  });
+});
+
+test('two paths are still two purchases', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, PAY_TO, AMOUNT_RAW);
+  await withServer(serverFor(node), async (base) => {
+    const one = await fetch(base + '/report', { headers: { host: 'example.dev', 'x-payment': proof() } });
+    const two = await fetch(base + '/other', { headers: { host: 'example.dev', 'x-payment': proof() } });
+    assert.equal(one.status, 200);
+    assert.equal(two.status, 200);
+  });
+});

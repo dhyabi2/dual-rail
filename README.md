@@ -20,8 +20,8 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 150 tests, includes the Python/Node conformance run
-(cd node && npm test)                           # 75 tests
+python3 -m unittest discover -s tests          # 154 tests, includes the Python/Node conformance run
+(cd node && npm test)                           # 77 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
 
@@ -321,7 +321,7 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 150 tests — OK
+Ran 154 tests — OK
 
 $ cd node && npm test
 # pass 75

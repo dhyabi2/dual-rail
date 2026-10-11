@@ -1210,5 +1210,67 @@ class OneAccountTwoSpellings(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "invalid_payto")
 
 
+class TheReplayKeyIsNotThePayersToChoose(unittest.TestCase):
+    """One confirmed send buys one call, whatever headers come with the retry.
+
+    `ReplayGuard` separates one purchase from another by the resource string
+    the adapter derives from the request, so anything in that string a payer
+    controls is a way back past the guard.
+    """
+
+    def serve(self, app, host="example.dev", scheme="http", path="/report"):
+        environ = {}
+        setup_testing_defaults(environ)
+        environ["PATH_INFO"] = path
+        environ["HTTP_HOST"] = host
+        environ["wsgi.url_scheme"] = scheme
+        environ["HTTP_X_PAYMENT"] = proof()
+        captured = {}
+
+        def start_response(status, response_headers, exc_info=None):
+            captured["status"] = status
+            return lambda data: None
+
+        b"".join(app(environ, start_response))
+        return captured["status"]
+
+    def test_another_host_header_does_not_buy_a_second_call(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW)
+        app = mounted(node)
+        self.assertTrue(self.serve(app).startswith("200"))
+        for host in ("example.dev.", "EXAMPLE.DEV", "example.dev:80", "anything-at-all", ""):
+            self.assertTrue(
+                self.serve(app, host=host).startswith("402"),
+                "block %s was served a second time under Host: %r - one payment, two calls"
+                % (BLOCK[:12], host))
+
+    def test_another_scheme_does_not_buy_a_second_call(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW)
+        app = mounted(node)
+        self.assertTrue(self.serve(app, scheme="http").startswith("200"))
+        self.assertTrue(self.serve(app, scheme="https").startswith("402"))
+
+    def test_the_key_carries_nothing_a_request_header_can_set(self):
+        keys = set()
+        for host in ("a", "b", ""):
+            for scheme in ("http", "https"):
+                keys.add(_adapter._resource_of(
+                    {"PATH_INFO": "/report", "HTTP_HOST": host, "wsgi.url_scheme": scheme}))
+        self.assertEqual(len(keys), 1, keys)
+
+    def test_two_paths_are_still_two_purchases(self):
+        """The narrowing must stop at the path: paying for one resource must
+        not be read as paying for another."""
+        self.assertNotEqual(_adapter._resource_of({"PATH_INFO": "/one"}),
+                            _adapter._resource_of({"PATH_INFO": "/two"}))
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW)
+        app = mounted(node)
+        self.assertTrue(self.serve(app, path="/report").startswith("200"))
+        self.assertTrue(self.serve(app, path="/other").startswith("200"))
+
+
 if __name__ == "__main__":
     unittest.main()
