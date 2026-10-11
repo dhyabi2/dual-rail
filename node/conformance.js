@@ -116,7 +116,7 @@ async function main() {
     declarations: declarations(matrix.declarations),
     proofs: proofs(matrix.proofs),
     payments: await payments(matrix.payments),
-    resource_keys: matrix.resource_keys.map((target) => resourceOfRequest({ originalUrl: target })),
+    resource_keys: (matrix.resource_keys || []).map((target) => resourceOfRequest({ originalUrl: target })),
   };
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }

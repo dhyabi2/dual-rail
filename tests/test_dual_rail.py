@@ -1363,6 +1363,14 @@ class AnUpgradedSellerKeepsItsSpentBlocks(unittest.TestCase):
                                headers={"X-Payment": proof()})
         self.assertTrue(status.startswith("402"), status)
 
+    def test_a_mounted_app_migrates_onto_its_mounted_key(self):
+        for old in ("http://shop.example/report", "/report", "/REPORT/"):
+            new = _verify.migrate_legacy_key(old, "/api")
+            self.assertEqual(new, "/api/report", old)
+            self.assertEqual(new, _adapter._resource_of({"SCRIPT_NAME": "/api", "PATH_INFO": "/report"}))
+        self.assertEqual(_verify.migrate_legacy_key("http://shop.example/report"), "/report")
+        self.assertEqual(_verify.migrate_legacy_key("http://shop.example/report", ""), "/report")
+
 
 if __name__ == "__main__":
     unittest.main()

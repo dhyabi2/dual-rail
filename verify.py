@@ -83,9 +83,17 @@ def resource_key(path) -> str:
     return text.translate(_UPPER_ASCII)
 
 
-#: A seller with a persisted ReplayGuard store rewrites each pre-upgrade key
-#: through this before serving traffic on the new version. See the README.
-migrate_legacy_key = resource_key
+def migrate_legacy_key(old_key, script_name="") -> str:
+    """Map a key the guard stored before 2026-10-11 onto the key it uses now.
+
+    A seller with a persisted ReplayGuard store rewrites each pre-upgrade key
+    through this before serving traffic on the new version. Python keys never
+    carried the WSGI mount point (SCRIPT_NAME) before, and now do, so an app
+    mounted under a prefix passes it here: `migrate_legacy_key(key, "/api")`.
+    Without it every migrated key misses and each old block is spendable once
+    more. See the README.
+    """
+    return resource_key((script_name or "") + resource_key(old_key))
 
 
 class ReplayGuard:
