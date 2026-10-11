@@ -91,7 +91,8 @@ def migrate_legacy_key(old_key, script_name="") -> str:
     carried the WSGI mount point (SCRIPT_NAME) before, and now do, so an app
     mounted under a prefix passes it here: `migrate_legacy_key(key, "/api")`.
     Without it every migrated key misses and each old block is spendable once
-    more. See the README.
+    more. Run it once per stored key: with a mount prefix it is not idempotent.
+    See the README.
     """
     return resource_key((script_name or "") + resource_key(old_key))
 

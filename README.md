@@ -20,7 +20,7 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 159 tests, includes the Python/Node conformance run
+python3 -m unittest discover -s tests          # 160 tests, includes the Python/Node conformance run
 (cd node && npm test)                           # 81 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
@@ -321,7 +321,7 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 159 tests — OK
+Ran 160 tests — OK
 
 $ cd node && npm test
 # pass 81
@@ -377,8 +377,9 @@ app mounted under a prefix passes it: `verify.migrate_legacy_key(key, "/api")`,
 because the Python key now includes SCRIPT_NAME and the old one did not (the
 Node key always carried the mount through `originalUrl`). An old key whose host part
 the payer shaped with an odd `Host:` header (`http://a/b/report`) maps to a
-different path, so a store that must be airtight also keeps its old keys for one
-payment lifetime after the upgrade. Without that, every block spent before the
+different path, so a store that must be airtight keeps its old keys as well as the
+migrated ones. Run the migration once: with a mount prefix it is not idempotent
+(a second pass turns `/api/report` into `/api/api/report`). Without that, every block spent before the
 upgrade can be spent once more. The in-memory default starts empty and needs
 nothing.
 
