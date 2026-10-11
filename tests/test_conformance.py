@@ -74,6 +74,16 @@ def build_matrix():
             "nano:mainnet:extra", "nano_mainnet", "nano:main", "a:b",
         ],
         "declarations": _declaration_cases(),
+        # Raw request targets, as they arrive on the request line. Both
+        # bindings must derive the same replay key from each, or a payer gets
+        # one more call per spelling on whichever binding is looser.
+        "resource_keys": [
+            "/report", "/report/", "/REPORT", "//report", "/%72eport", "/report%2F",
+            "/report?x=1", "/Report//?a=b", "http://a.example/report",
+            "https://b.example:8443/report/", "HTTP://C/report", "/", "", "//",
+            "/reports", "/report/archive", "/a%20b", "/caf%C3%A9", "/%7Euser",
+            "report",
+        ],
         "payments": [
             {"header": _proof(BLOCK), "block": _block(BLOCK, PAY_TO, 10 ** 26, True)},
             {"header": _proof(BLOCK), "block": _block(BLOCK, PAY_TO, 10 ** 26 - 1, True)},
@@ -271,7 +281,18 @@ def python_result(matrix):
         "declarations": [_declaration.inspect(value) for value in matrix["declarations"]],
         "proofs": [_proof_case(header) for header in matrix["proofs"]],
         "payments": [_payment_case(case) for case in matrix["payments"]],
+        "resource_keys": [_resource_key_case(target) for target in matrix["resource_keys"]],
     }
+
+
+def _resource_key_case(target):
+    """What a WSGI server makes of a request target (wsgiref, exactly: the
+    query split off the raw target, then PATH_INFO percent-decoded as
+    latin-1), and the key the adapter derives from it."""
+    import urllib.parse
+    path = target.split("?", 1)[0]
+    environ = {"SCRIPT_NAME": "", "PATH_INFO": urllib.parse.unquote(path, "iso-8859-1")}
+    return _adapter._resource_of(environ)
 
 
 def _address(value):

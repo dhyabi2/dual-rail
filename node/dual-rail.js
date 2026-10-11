@@ -176,6 +176,7 @@ class DualRail {
         `${JSON.stringify(challenge.NETWORK)}`);
     }
     const blockHash = blockHashOf(payload);
+    resource = resourceKey(resource);
     if (this.guard.seen(resource, blockHash)) {
       throw new Unpaid('replayed',
         `block ${blockHash.slice(0, 12)} has already been spent on this resource`);
@@ -260,10 +261,44 @@ class DualRail {
 // Only the path does. Keying on the path alone is strictly coarser than the old
 // key - any two requests that shared the old key share this one - so it can
 // refuse more and admit less, never the other way. The Python binding's
-// `_resource_of` is the same change, and conformance.test.js holds the two to
-// the same matrix.
+// `_resource_of` is the same change, and tests/test_conformance.py (through
+// conformance.js) holds the two to the same matrix.
+//
+// The path is the payer's to spell as well. An absolute-form request line
+// (`GET http://any.host/report`) puts a scheme and host back into req.url while
+// Express still routes it to /report, and stock Express is case-insensitive and
+// non-strict, so `/report/`, `/REPORT`, `//report`, `/%72eport` each bought
+// another call on one payment. So the raw target loses its query and any
+// `scheme://authority` prefix, is percent-decoded byte for byte into latin-1
+// (exactly what a WSGI server hands Python as PATH_INFO, PEP 3333), and then
+// goes through `resourceKey`, which is `verify.resource_key` in Python.
 function resourceOfRequest(req) {
-  return (req.originalUrl || req.url || '').split('?')[0] || '/';
+  let target = String(req.originalUrl || req.url || '');
+  target = target.split('?')[0].split('#')[0].replace(ABSOLUTE_FORM, '');
+  return resourceKey(target.replace(/%([0-9A-Fa-f]{2})/g,
+    (_, hex) => String.fromCharCode(parseInt(hex, 16))));
+}
+
+const ABSOLUTE_FORM = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/]*/;
+
+// The replay guard's key for a percent-decoded path: no query or fragment, no
+// `scheme://authority` prefix, repeated slashes collapsed, no trailing slash,
+// ASCII lowercased. Every step merges keys and none splits one, so it can only
+// refuse more. It is idempotent, and `verify` applies it to whatever resource
+// it is handed, so a caller passing a full URL lands in the same bucket.
+function resourceKey(path) {
+  let text = path == null ? '' : String(path);
+  text = text.split('?')[0].split('#')[0].replace(ABSOLUTE_FORM, '');
+  text = ('/' + text).replace(/\/{2,}/g, '/');
+  if (text.length > 1 && text.endsWith('/')) text = text.slice(0, -1);
+  return text.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+// A seller with a persisted ReplayGuard store held every block spent before
+// 2026-10-11 under `proto://host/rawpath`. Rewriting each stored key through
+// this, before serving traffic on the new version, keeps those blocks spent.
+function migrateLegacyKey(oldKey) {
+  return resourceOfRequest({ url: oldKey });
 }
 
 function dualRail(options = {}) {
@@ -352,4 +387,5 @@ function patchOutgoing402(rail, res) {
 }
 
 module.exports = { dualRail, DualRail, ConfigurationError, Unpaid, ReplayGuard,
+                   resourceKey, resourceOfRequest, migrateLegacyKey,
                    parsePayment, blockHashOf, isOurs, PAYMENT_HEADER };

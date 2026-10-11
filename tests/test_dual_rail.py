@@ -1272,5 +1272,105 @@ class TheReplayKeyIsNotThePayersToChoose(unittest.TestCase):
         self.assertTrue(self.serve(app, path="/other").startswith("200"))
 
 
+
+def _raw_get(base, target, payment):
+    """One GET with the request target sent exactly as given - absolute-form,
+    doubled slashes and percent-escapes included - which urllib would tidy."""
+    import http.client
+    import urllib.parse
+    parts = urllib.parse.urlsplit(base)
+    conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+    try:
+        conn.putrequest("GET", target, skip_host=True, skip_accept_encoding=True)
+        conn.putheader("Host", "example.dev")
+        conn.putheader("X-Payment", payment)
+        conn.endheaders()
+        response = conn.getresponse()
+        response.read()
+        return response.status
+    finally:
+        conn.close()
+
+
+class OnePaymentIsOneCallWhateverThePathLooksLike(unittest.TestCase):
+    """The path is still the payer's to spell. Every spelling below reaches the
+    same handler on a stock server or framework, so every spelling must land in
+    the same bucket of the replay guard - or each one buys another call."""
+
+    VARIANTS = (
+        "http://a.example/report",          # absolute-form request line
+        "http://b.example/report",
+        "https://example.dev/report",
+        "/report/",
+        "/REPORT",
+        "//report",
+        "/%72eport",
+        "/report%2F",
+        "/report?again=1",
+        "/Report//",
+    )
+
+    def test_a_respelled_path_does_not_buy_a_second_call_over_real_http(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW)
+        with live_server(mounted(node)) as base:
+            self.assertEqual(_raw_get(base, "/report", proof()), 200)
+            for target in self.VARIANTS:
+                self.assertEqual(
+                    _raw_get(base, target, proof()), 402,
+                    "block %s was served a second time as %r - one payment, two calls"
+                    % (BLOCK[:12], target))
+
+    def test_two_different_routes_are_still_two_purchases_over_real_http(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW)
+        with live_server(mounted(node)) as base:
+            self.assertEqual(_raw_get(base, "/report", proof()), 200)
+            self.assertEqual(_raw_get(base, "/reports", proof()), 200)
+            self.assertEqual(_raw_get(base, "/report/archive", proof()), 200)
+
+    def test_the_key_includes_the_mount_point(self):
+        """Node keys on originalUrl, which carries the mount prefix; PATH_INFO
+        does not. SCRIPT_NAME is the seller's, not the payer's."""
+        self.assertEqual(_adapter._resource_of({"SCRIPT_NAME": "/api", "PATH_INFO": "/report"}),
+                         "/api/report")
+
+
+class AnUpgradedSellerKeepsItsSpentBlocks(unittest.TestCase):
+    """A seller whose ReplayGuard is backed by a persisted store holds every
+    block spent before the upgrade under the old `scheme://host/path` key.
+    `resource_key` is the one map from any key the guard has ever been given
+    to the key it is given now, so a store rewritten through it refuses those
+    blocks again."""
+
+    def test_an_old_key_maps_onto_the_new_one(self):
+        for old in ("http://example.dev/report", "https://EXAMPLE.dev:443/report/",
+                    "http://anything-at-all//report"):
+            self.assertEqual(_verify.resource_key(old), "/report", old)
+
+    def test_a_block_spent_before_the_upgrade_is_still_spent_after_it(self):
+        node = fakenode.FakeNode()
+        node.settle(BLOCK, PAY_TO, AMOUNT_RAW)
+        persisted = {"http://example.dev/report": {BLOCK}}
+        guard = _verify.ReplayGuard()
+        for old_key, blocks in persisted.items():
+            for block in blocks:
+                guard.remember(_verify.migrate_legacy_key(old_key), block)
+        rail = build(node=node)
+        rail.guard = guard
+        gate, protected = testhost.make_host()
+        status, _, _ = request(rail.wsgi(protected, gate=gate),
+                               headers={"X-Payment": proof()})
+        self.assertTrue(status.startswith("402"), status)
+
+    def test_a_mounted_app_migrates_onto_its_mounted_key(self):
+        for old in ("http://shop.example/report", "/report", "/REPORT/"):
+            new = _verify.migrate_legacy_key(old, "/api")
+            self.assertEqual(new, "/api/report", old)
+            self.assertEqual(new, _adapter._resource_of({"SCRIPT_NAME": "/api", "PATH_INFO": "/report"}))
+        self.assertEqual(_verify.migrate_legacy_key("http://shop.example/report"), "/report")
+        self.assertEqual(_verify.migrate_legacy_key("http://shop.example/report", ""), "/report")
+
+
 if __name__ == "__main__":
     unittest.main()
