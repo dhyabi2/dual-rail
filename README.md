@@ -20,7 +20,7 @@ No dependencies, in either language. Python 3.8+ and the standard library; Node
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 154 tests, includes the Python/Node conformance run
+python3 -m unittest discover -s tests          # 159 tests, includes the Python/Node conformance run
 (cd node && npm test)                           # 77 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
@@ -321,10 +321,10 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 154 tests — OK
+Ran 159 tests — OK
 
 $ cd node && npm test
-# pass 75
+# pass 81
 
 $ python3 -m unittest tests.test_conformance
 ```
@@ -358,6 +358,23 @@ and exactly one element was added.
 The replay guard is per-process and in-memory. A service running several workers
 needs a shared store behind `ReplayGuard.seen`/`remember` — two methods, said
 here rather than discovered in production.
+
+The guard keys each purchase on the request **path**, canonicalised the same way
+in both bindings (`verify.resource_key` / `resourceKey`): query and any
+`scheme://host` prefix dropped, percent-escapes decoded, repeated slashes
+collapsed, trailing slash dropped, ASCII lowercased. So `/report/`, `/REPORT`,
+`//report`, `/%72eport` and `GET http://any.host/report` are one purchase, and
+`/report` and `/reports` are two. A route whose handler really is
+case-sensitive shares one key with its other-case spellings: that refuses a
+second call, it never admits one.
+
+**Upgrading with a persisted store.** Before 2026-10-11 the key was
+`scheme://host/path`. If your `seen`/`remember` are backed by a store that
+outlives the process, rewrite every stored key through
+`verify.migrate_legacy_key(key)` (Python) or `migrateLegacyKey(key)` (Node)
+before the new version takes traffic. Without that, every block spent before the
+upgrade can be spent once more. The in-memory default starts empty and needs
+nothing.
 
 ## Who made this, and its honest limits
 

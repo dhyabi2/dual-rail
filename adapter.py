@@ -210,5 +210,14 @@ def _resource_of(environ) -> str:
     was bought. Only the path does. Keying on the path alone is strictly
     coarser than the old key - any two requests that shared the old key share
     this one - so it can refuse more and admit less, never the other way.
+
+    The path itself is then canonicalised by `verify.resource_key`, because
+    it is the payer's to spell too: `/report/`, `/REPORT`, `//report` and an
+    absolute-form `GET http://any.host/report` all reach the same handler and
+    each used to buy another call. SCRIPT_NAME is prepended because it is the
+    seller's mount point, not the payer's, and because the Node binding keys
+    on `originalUrl`, which carries the mount prefix: the two must agree.
+    PATH_INFO arrives percent-decoded (PEP 3333), which is what the Node
+    binding decodes its raw path to before the same canonicalisation.
     """
-    return environ.get("PATH_INFO", "") or "/"
+    return _verify.resource_key(environ.get("SCRIPT_NAME", "") + environ.get("PATH_INFO", ""))

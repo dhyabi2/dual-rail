@@ -11,7 +11,7 @@ const challenge = require('./challenge.js');
 const declaration = require('./declaration.js');
 const money = require('./money.js');
 const network = require('./network.js');
-const { DualRail, parsePayment, blockHashOf, isOurs } = require('./dual-rail.js');
+const { DualRail, parsePayment, blockHashOf, isOurs, resourceOfRequest } = require('./dual-rail.js');
 const testhost = require('./testhost.js');
 
 const PAY_TO = 'nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3';
@@ -116,6 +116,7 @@ async function main() {
     declarations: declarations(matrix.declarations),
     proofs: proofs(matrix.proofs),
     payments: await payments(matrix.payments),
+    resource_keys: matrix.resource_keys.map((target) => resourceOfRequest({ originalUrl: target })),
   };
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }

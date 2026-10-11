@@ -1,8 +1,8 @@
 'use strict';
 // The same fourteen numbered tests as tests/test_dual_rail.py, against the Node
 // binding. The definition of done says both bindings must behave identically on
-// the whole matrix; this file is half of that, and conformance.test.js is the
-// half that compares the two implementations directly.
+// the whole matrix; this file is half of that, and tests/test_conformance.py
+// (driving conformance.js) is the half that compares the two implementations directly.
 
 const assert = require('node:assert/strict');
 const http = require('node:http');
@@ -538,5 +538,87 @@ test('two paths are still two purchases', async () => {
     const two = await fetch(base + '/other', { headers: { host: 'example.dev', 'x-payment': proof() } });
     assert.equal(one.status, 200);
     assert.equal(two.status, 200);
+  });
+});
+
+// One GET with the request target written exactly as given - absolute-form,
+// doubled slashes and percent-escapes included - which fetch would tidy away.
+function rawGet(base, target, payment) {
+  const { port } = new URL(base);
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method: 'GET', path: target,
+      headers: { host: 'example.dev', 'x-payment': payment } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+const RESPELLINGS = [
+  'http://a.example/report', // absolute-form request line
+  'http://b.example/report',
+  'https://example.dev/report',
+  '/report/',
+  '/REPORT',
+  '//report',
+  '/%72eport',
+  '/report%2F',
+  '/report?again=1',
+  '/Report//',
+];
+
+test('one payment is one call whatever the path looks like', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, PAY_TO, AMOUNT_RAW);
+  await withServer(serverFor(node), async (base) => {
+    assert.equal(await rawGet(base, '/report', proof()), 200);
+    for (const target of RESPELLINGS) {
+      assert.equal(await rawGet(base, target, proof()), 402,
+        `block was served a second time as ${JSON.stringify(target)} - one payment, two calls`);
+    }
+  });
+});
+
+test('two different routes are still two purchases, over the raw request line', async () => {
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, PAY_TO, AMOUNT_RAW);
+  await withServer(serverFor(node), async (base) => {
+    assert.equal(await rawGet(base, '/report', proof()), 200);
+    assert.equal(await rawGet(base, '/reports', proof()), 200);
+    assert.equal(await rawGet(base, '/report/archive', proof()), 200);
+  });
+});
+
+test('an old scheme://host/path key maps onto the new one', () => {
+  const { resourceKey } = require('../dual-rail.js');
+  assert.equal(typeof resourceKey, 'function');
+  for (const old of ['http://example.dev/report', 'https://EXAMPLE.dev:443/report/',
+    'http://anything-at-all//report']) {
+    assert.equal(resourceKey(old), '/report', old);
+  }
+  const { migrateLegacyKey } = require('../dual-rail.js');
+  assert.equal(migrateLegacyKey('http://example.dev/%72eport'), '/report');
+});
+
+test('a block spent before the upgrade is still spent after it', async () => {
+  const { migrateLegacyKey } = require('../dual-rail.js');
+  const node = new testhost.FakeNode();
+  node.settle(BLOCK, PAY_TO, AMOUNT_RAW);
+  const persisted = new Map([['http://example.dev/report', [BLOCK]]]);
+  const server = (() => {
+    const { gate, protected: paid } = testhost.makeHost();
+    const middleware = dualRail({ payTo: PAY_TO, amountXno: AMOUNT, node, gate });
+    for (const [oldKey, blocks] of persisted) {
+      for (const block of blocks) middleware.rail.guard.remember(migrateLegacyKey(oldKey), block);
+    }
+    return http.createServer((req, res) => {
+      Promise.resolve(middleware(req, res, () => paid(req, res)))
+        .catch((err) => { res.writeHead(500); res.end(String(err)); });
+    });
+  })();
+  await withServer(server, async (base) => {
+    assert.equal(await rawGet(base, '/report', proof()), 402);
   });
 });

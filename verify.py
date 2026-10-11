@@ -18,6 +18,7 @@ customer who was paying in USDC.
 import base64
 import binascii
 import json
+import re
 
 import challenge as _challenge
 import money
@@ -49,6 +50,42 @@ class Unpaid(Exception):
         self.reason = reason
         self.message = message
         self.detail = detail
+
+
+_ABSOLUTE_FORM = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/]*")
+_SLASHES = re.compile(r"/{2,}")
+_UPPER_ASCII = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def resource_key(path) -> str:
+    """The replay guard's key for a (percent-decoded) request path.
+
+    The path is the payer's to spell, and every spelling a stock server or
+    framework routes to the same handler must land in the same bucket of the
+    guard, or each spelling buys one more call on one payment. So: drop the
+    query and fragment, drop a `scheme://authority` prefix (an absolute-form
+    request line puts one there, and wsgiref passes it into PATH_INFO as is),
+    collapse repeated slashes, drop a trailing slash and lowercase ASCII.
+
+    Every step merges keys and none splits one, so this can only refuse more
+    and admit less. It is idempotent, and it is also the map from a key the
+    guard was given before 2026-10-11 (`scheme://host/path`) to the key it is
+    given now: a persisted store rewritten through it keeps every spent block
+    spent. `node/dual-rail.js` `resourceKey` is the same function, and
+    tests/test_conformance.py holds the two to the same matrix.
+    """
+    text = "" if path is None else str(path)
+    text = text.split("?", 1)[0].split("#", 1)[0]
+    text = _ABSOLUTE_FORM.sub("", text, count=1)
+    text = _SLASHES.sub("/", "/" + text)
+    if len(text) > 1 and text.endswith("/"):
+        text = text[:-1]
+    return text.translate(_UPPER_ASCII)
+
+
+#: A seller with a persisted ReplayGuard store rewrites each pre-upgrade key
+#: through this before serving traffic on the new version. See the README.
+migrate_legacy_key = resource_key
 
 
 class ReplayGuard:
@@ -123,6 +160,7 @@ def verify(header: str, pay_to: str, amount_raw: int, resource, node: nanonode.N
         raise Unpaid("not_our_rail", "this proof is for %r, not %r"
                      % (payload.get("network"), _challenge.NETWORK))
     block_hash = block_hash_of(payload)
+    resource = resource_key(resource)
 
     if guard.seen(resource, block_hash):
         raise Unpaid("replayed", "block %s has already been spent on this resource"
