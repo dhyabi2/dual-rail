@@ -372,16 +372,18 @@ second call, it never admits one.
 `scheme://host/path` (and, briefly on 2026-10-11, on the raw path alone). If
 your `seen`/`remember` are backed by a store that outlives the process, rewrite
 every stored key through `verify.migrate_legacy_key(key)` (Python) or
-`migrateLegacyKey(key)` (Node) before the new version takes traffic. A Python
-app mounted under a prefix passes it: `verify.migrate_legacy_key(key, "/api")`,
-because the Python key now includes SCRIPT_NAME and the old one did not (the
-Node key always carried the mount through `originalUrl`). An old key whose host part
-the payer shaped with an odd `Host:` header (`http://a/b/report`) maps to a
-different path, so a store that must be airtight keeps its old keys as well as the
-migrated ones. Run the migration once: with a mount prefix it is not idempotent
-(a second pass turns `/api/report` into `/api/api/report`). Without that, every block spent before the
-upgrade can be spent once more. The in-memory default starts empty and needs
-nothing.
+`migrateLegacyKey(key)` (Node) before the new version takes traffic. Without
+that, every block spent before the upgrade can be spent once more. The
+in-memory default starts empty and needs nothing.
+
+A Python app mounted under a prefix passes it: `verify.migrate_legacy_key(key,
+"/api")`, because the Python key now includes SCRIPT_NAME and the old one did
+not (the Node key always carried the mount through `originalUrl`). Run the
+migration once: with a mount prefix it is not idempotent (a second pass turns
+`/api/report` into `/api/api/report`). One kind of old key cannot be migrated:
+one whose host part the payer shaped with an odd `Host:` header
+(`http://a/b/report` becomes `/b/report`), so that block can be spent once more
+on the real path. It takes planning before the upgrade and buys one call.
 
 ## Who made this, and its honest limits
 
