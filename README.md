@@ -79,7 +79,8 @@ python3 cli.py add --manifest https://your-service.example/.well-known/x402 \
 ```
 
 Not published to PyPI or npm yet: install from this repository
-(`pip install git+https://github.com/dhyabi2/dual-rail`, or
+(`pip install git+https://github.com/dhyabi2/dual-rail`, pinned to the release with
+`pip install "dual-rail @ git+https://github.com/dhyabi2/dual-rail@v1.1.0"`, or
 `require('./node/dual-rail')` from a checkout).
 
 The `nano_3t6k35gi…` address in the examples is the public Nano **genesis**
