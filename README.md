@@ -65,7 +65,7 @@ An operator who will not let the agent hold a key: see [OPERATORS.md](https://gi
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 174 tests, includes the Python/Node conformance run
+python3 -m unittest discover -s tests          # 203 tests, includes the Python/Node conformance run
 (cd node && npm test)                           # 81 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
@@ -80,7 +80,7 @@ python3 cli.py add --manifest https://your-service.example/.well-known/x402 \
 
 Not published to PyPI or npm yet: install from this repository
 (`pip install git+https://github.com/dhyabi2/dual-rail`, pinned to the release with
-`pip install "dual-rail @ git+https://github.com/dhyabi2/dual-rail@v1.1.0"`, or
+`pip install "dual-rail @ git+https://github.com/dhyabi2/dual-rail@v1.2.0"`, or
 `require('./node/dual-rail')` from a checkout).
 
 The `nano_3t6k35gi…` address in the examples is the public Nano **genesis**
@@ -150,6 +150,28 @@ application = rail.wsgi(protected_app, gate=x402_middleware)
   process still refuses a block it served before. Pass `guard=` to supply your own (`seen`, `claim`).
 
 Not done: the Node binding has no equivalent yet, and the binding does not cover the request body.
+
+## Acceptance kit and the paste-in accepts[] generator
+
+Two commands a seller can run. Both read only: no key, no payment, nothing is installed.
+
+**`python3 acceptance_kit.py`** runs five cases a Nano-paid seller should pass, and exits 0 only if all five ran and passed
+(5 means a case was skipped, 1 means one failed). The last three need a [nano-invoice](https://github.com/dhyabi2/nano-invoice)
+checkout: `git clone --branch v0.2.1 https://github.com/dhyabi2/nano-invoice` and `--nano-invoice PATH`.
+
+| case | what passing it proves |
+|---|---|
+| `refusal-probe` | a check built to say no does say no: 15 offline payments (1 honest, 14 that must be refused for the stated reason) |
+| `accepts-shape` | the Nano `accepts[]` entry has every field x402 v1 and v2 require, raw as an integer string, a checksummed `payTo`; `--manifest URL` runs it on yours |
+| `duplicate-retry` | one payment presented twice is served once, in memory and after a restart; a second exact transfer is `duplicate` and refunded to its sender |
+| `attribution-tests` | exact amount pays and records the chain's sender; off by one raw pays nothing; short is underpaid; after expiry is late |
+| `buyer-recovery` | the invoice id re-derives from merchant and order key, the same order key returns the same invoice, a duplicate is refunded |
+
+**`python3 accepts_snippet.py --manifest URL --pay-to nano_... [--usd 0.01 | --amount 0.0001] [--framework python|node]`**
+reads your own x402 manifest and prints the exact modified manifest (your entries untouched, one Nano entry appended), its
+diff, the server change, and a test that fails if an existing entry changed. With `--usd` the price stays in dollars:
+converted to raw at read time from two independent feeds (refused if they differ by more than 2 percent, rounded up), valid
+60 seconds, refunds return the same raw. See [`docs/USD-PEGGED-QUOTE.md`](https://github.com/dhyabi2/xno-call-binding/blob/main/docs/USD-PEGGED-QUOTE.md).
 
 ## The verifier is the product
 
