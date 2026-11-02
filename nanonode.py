@@ -63,6 +63,9 @@ def read_block_info(answer: dict) -> dict:
         "destination": destination,
         "amount_raw": int(answer["amount"]) if answer.get("amount") else 0,
         "subtype": subtype,
+        # The account the block belongs to: for a send, the PAYER. Used by
+        # binding.py to check the presenter controls the paying key.
+        "account": answer.get("block_account"),
     }
 
 

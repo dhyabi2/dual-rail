@@ -65,7 +65,7 @@ An operator who will not let the agent hold a key: see [OPERATORS.md](https://gi
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 160 tests, includes the Python/Node conformance run
+python3 -m unittest discover -s tests          # 174 tests, includes the Python/Node conformance run
 (cd node && npm test)                           # 81 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
@@ -118,6 +118,37 @@ is the same convention the USDC entries above use: their `"10000"` is 0.01 USDC
 at 6 decimals, not ten thousand dollars. `maxAmountRequiredFormatted` carries
 the decimal figure for a human. You still configure the price in XNO
 (`amountXno: "0.0001"`); only the wire format is raw.
+
+## Bind each payment to its request, and keep spent blocks across restarts (opt-in, Python)
+
+Two reviewers' objections to Nano-on-x402 code, answered in two constructor options. Both are off
+by default, so an existing install changes by nothing.
+
+```python
+rail = dual_rail(payTo="nano_YOUR_ADDRESS", amountXno="0.0001",
+                 nodeUrl="https://rpc.nano.to",
+                 bindingSecret=os.environ["DUAL_RAIL_SECRET"],   # >= 16 random bytes, yours alone
+                 replayDb="/var/lib/myapp/nano-spent.db")        # survives restarts, shared by workers
+application = rail.wsgi(protected_app, gate=x402_middleware)
+```
+
+* **Payment-to-request binding (`nano-block-sig/1`).** A confirmed send block is public, so a proof that is
+  only its hash can be presented by anyone who saw it. With `bindingSecret` the 402's Nano entry carries
+  `extra.binding = {scheme, nonce, resource}` and the payer must add `payload.binding = {nonce, signature}`:
+  an Ed25519-BLAKE2b signature, made with the key of the account that PAID, over
+  `"nano-402-binding/1\n" + block_hash + "\n" + nonce + "\n" + resource + "\n" + payTo`. The seller holds no
+  state for the nonce (`<expiry_hex>.<HMAC(secret, resource|expiry|payTo)>`, ten minutes). A watcher with only
+  the block hash cannot sign; a signature for `/report` is worthless on `/other`; a nonce from another seller or
+  for another payee is refused. A bad or missing binding is "unpaid": the request falls through to your other
+  rails exactly like any other failed proof. The buyer side is `nano-pay402` in
+  [nano-wallet-xno](https://github.com/dhyabi2/nano-wallet-xno), which signs the identical message
+  (`tests/test_binding.py` and its tests pin one shared signature vector).
+* **Persistent, atomic replay store.** `replayDb` is a SQLite file (mode 0600, WAL). A block is spent once,
+  for whichever resource claims it first, with one atomic `INSERT OR IGNORE`: 32 racing threads over four
+  connections give exactly one winner (`test_concurrent_claims_have_exactly_one_winner`), and a restarted
+  process still refuses a block it served before. Pass `guard=` to supply your own (`seen`, `claim`).
+
+Not done: the Node binding has no equivalent yet, and the binding does not cover the request body.
 
 ## The verifier is the product
 
@@ -368,7 +399,7 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 160 tests — OK
+Ran 174 tests — OK
 
 $ cd node && npm test
 # pass 81

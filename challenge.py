@@ -37,7 +37,7 @@ class NotAdditive(AssertionError):
     """Raised rather than emit a patch that changes anything existing."""
 
 
-def nano_entry(pay_to: str, amount_xno: str, resource) -> dict:
+def nano_entry(pay_to: str, amount_xno: str, resource, binding=None) -> dict:
     """The single element this adapter appends. Nothing else is ever written.
 
     The amount is in the asset's ATOMIC unit - raw, of which there are 10**30 to
@@ -77,7 +77,7 @@ def nano_entry(pay_to: str, amount_xno: str, resource) -> dict:
     the amount a payment is checked against is exactly what it always was.
     """
     raw = str(money.xno_to_raw(amount_xno))
-    return {
+    entry = {
         "scheme": SCHEME,
         "network": NETWORK,
         "asset": ASSET,
@@ -90,6 +90,9 @@ def nano_entry(pay_to: str, amount_xno: str, resource) -> dict:
         "maxTimeoutSeconds": MAX_TIMEOUT_SECONDS,
         "extra": {"decimals": DECIMALS, "adapter": ADAPTER_ID},
     }
+    if binding is not None:
+        entry["extra"]["binding"] = binding
+    return entry
 
 
 def find_nano(accepts) -> int:
@@ -137,7 +140,7 @@ def assert_additive(before, after) -> None:
         raise NotAdditive("the appended entry is not the Nano entry")
 
 
-def append_nano(challenge: dict, pay_to: str, amount_xno: str) -> dict:
+def append_nano(challenge: dict, pay_to: str, amount_xno: str, binding=None) -> dict:
     """A copy of `challenge` with one Nano entry appended to accepts[].
 
     Returns the challenge UNCHANGED if a Nano entry is already present, so
@@ -150,6 +153,6 @@ def append_nano(challenge: dict, pay_to: str, amount_xno: str) -> dict:
     if find_nano(accepts) != -1:
         return patched
     before = copy.deepcopy(accepts)
-    accepts.append(nano_entry(pay_to, amount_xno, resource_of(accepts)))
+    accepts.append(nano_entry(pay_to, amount_xno, resource_of(accepts), binding))
     assert_additive(before, accepts)
     return patched

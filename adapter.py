@@ -25,10 +25,12 @@ middleware, and `opts.gate` to admit.
 
 import json
 
+import binding as _binding
 import challenge as _challenge
 import money
 import nanoaddr
 import nanonode
+import store as _store
 import verify as _verify
 
 PAYMENT_HEADER = "X-PAYMENT"
@@ -54,7 +56,8 @@ class ConfigurationError(ValueError):
 class DualRail:
     def __init__(self, pay_to, amount_xno, node_url=None, network=_challenge.NETWORK,
                  on_verify_error=ONLY_PERMITTED_ON_VERIFY_ERROR, node=None,
-                 timeout=nanonode.DEFAULT_TIMEOUT, logger=None):
+                 timeout=nanonode.DEFAULT_TIMEOUT, logger=None,
+                 binding_secret=None, replay_db=None, guard=None):
         verdict = nanoaddr.validate(pay_to)
         if not verdict["valid"]:
             raise ConfigurationError(
@@ -82,15 +85,38 @@ class DualRail:
         self.amount_xno = str(amount_xno)
         self.node = node if node is not None else (
             nanonode.HttpNanoNode(node_url, timeout) if node_url else None)
-        self.guard = _verify.ReplayGuard()
+        # Optional hardening (both off by default, so nothing changes for an existing install):
+        #  * binding_secret: require every Nano payment to carry a nano-block-sig/1 binding,
+        #    proving the presenter controls the paying account (binding.py);
+        #  * replay_db / guard: a spent-block store that survives restarts (store.py).
+        if isinstance(binding_secret, str):
+            binding_secret = binding_secret.encode("utf-8")
+        if binding_secret is not None and len(binding_secret) < 16:
+            raise ConfigurationError("weak_binding_secret",
+                                     "bindingSecret must be at least 16 bytes of random data")
+        self.binding_secret = binding_secret
+        if guard is not None:
+            self.guard = guard
+        elif replay_db:
+            self.guard = _store.SqliteReplayGuard(replay_db)
+        else:
+            self.guard = _verify.ReplayGuard()
         self._log = logger
         self._warned = set()
 
     # -- the two things it does ------------------------------------------
 
-    def patch_challenge(self, challenge_body: dict) -> dict:
-        """Append our entry to a 402 challenge. Never alters an existing one."""
-        return _challenge.append_nano(challenge_body, self.pay_to, self.amount_xno)
+    def patch_challenge(self, challenge_body: dict, resource=None) -> dict:
+        """Append our entry to a 402 challenge. Never alters an existing one.
+
+        With a binding secret, `resource` (the request path, as `_resource_of` keys it) is
+        required: the nonce in the entry is issued for that resource only.
+        """
+        binding = None
+        if self.binding_secret is not None and resource is not None:
+            binding = _binding.binding_extra(self.binding_secret,
+                                             _verify.resource_key(resource), self.pay_to)
+        return _challenge.append_nano(challenge_body, self.pay_to, self.amount_xno, binding)
 
     def check_payment(self, header, resource):
         """The verified payment, or None. NEVER raises - falling through is the
@@ -100,7 +126,7 @@ class DualRail:
             return None
         try:
             return _verify.verify(header, self.pay_to, self.amount_raw, resource,
-                                  self.node, self.guard)
+                                  self.node, self.guard, self.binding_secret)
         except _verify.Unpaid as exc:
             self._warn_once(exc)
             return None
@@ -153,13 +179,13 @@ class DualRail:
             headers = captured.get("headers", [])
 
             if status.split(" ", 1)[0] == "402":
-                body, headers = adapter._patched(body, headers)
+                body, headers = adapter._patched(body, headers, resource)
             start_response(status, headers, captured.get("exc_info"))
             return [body]
 
         return middleware
 
-    def _patched(self, body: bytes, headers):
+    def _patched(self, body: bytes, headers, resource=None):
         """Append our entry to a 402 body, or return it untouched.
 
         Anything unexpected about the body - not JSON, no accepts[], a
@@ -168,7 +194,7 @@ class DualRail:
         """
         try:
             parsed = json.loads(body.decode("utf-8"))
-            patched = self.patch_challenge(parsed)
+            patched = self.patch_challenge(parsed, resource)
         except Exception:
             return body, headers
         if patched == parsed:
@@ -187,7 +213,8 @@ def dual_rail(**options) -> DualRail:
     the same configuration can be pasted between the two bindings.
     """
     mapping = {"payTo": "pay_to", "amountXno": "amount_xno", "nodeUrl": "node_url",
-               "onVerifyError": "on_verify_error"}
+               "onVerifyError": "on_verify_error", "bindingSecret": "binding_secret",
+               "replayDb": "replay_db"}
     normalised = {mapping.get(key, key): value for key, value in options.items()}
     return DualRail(**normalised)
 

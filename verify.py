@@ -20,6 +20,7 @@ import binascii
 import json
 import re
 
+import binding as _binding
 import challenge as _challenge
 import money
 import nanoaddr
@@ -162,8 +163,12 @@ def is_ours(payload: dict) -> bool:
 
 
 def verify(header: str, pay_to: str, amount_raw: int, resource, node: nanonode.NanoNode,
-           guard: ReplayGuard) -> dict:
-    """Return the payment on success; raise `Unpaid` otherwise. Never raises NodeError."""
+           guard: ReplayGuard, binding_secret=None) -> dict:
+    """Return the payment on success; raise `Unpaid` otherwise. Never raises NodeError.
+
+    With `binding_secret` the payment must also carry a `nano-block-sig/1` binding (see
+    binding.py): the presenter must prove it controls the account that made the payment.
+    """
     payload = parse_payment(header)
     if not is_ours(payload):
         raise Unpaid("not_our_rail", "this proof is for %r, not %r"
@@ -216,6 +221,21 @@ def verify(header: str, pay_to: str, amount_raw: int, resource, node: nanonode.N
                         money.raw_to_xno(amount_raw)),
                      shortfall_raw=amount_raw - paid_raw)
 
-    guard.remember(resource, block_hash)
+    if binding_secret is not None:
+        inner = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        try:
+            _binding.verify_binding(binding_secret, inner.get("binding"), block_hash,
+                                    info.get("account"), resource, pay_to)
+        except _binding.BindingError as exc:
+            raise Unpaid(exc.reason, exc.message) from None
+
+    # Atomic where the guard offers it (SqliteReplayGuard): two requests presenting the
+    # same block at once cannot both pass a seen()/remember() pair.
+    claim = getattr(guard, "claim", None)
+    if claim is not None:
+        if not claim(resource, block_hash):
+            raise Unpaid("replayed", "block %s has already been spent" % block_hash[:12])
+    else:
+        guard.remember(resource, block_hash)
     return {"block_hash": block_hash, "amount_raw": paid_raw, "payTo": pay_to,
             "overpaid_raw": paid_raw - amount_raw}

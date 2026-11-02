@@ -18,12 +18,13 @@ class FakeNode(nanonode.NanoNode):
         self.calls = []
 
     def settle(self, block_hash, destination, amount_raw, confirmed=True,
-               subtype="send"):
+               subtype="send", account=None):
         self.blocks[block_hash.upper()] = {
             "confirmed": bool(confirmed),
             # Only a send has a destination, exactly as `block_info` reports it.
             "destination": destination if subtype == "send" else None,
             "amount_raw": int(amount_raw), "subtype": subtype,
+            "account": account,
         }
         return block_hash.upper()
 
