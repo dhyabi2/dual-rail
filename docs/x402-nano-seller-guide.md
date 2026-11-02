@@ -112,6 +112,24 @@ Port these to whatever verifier you run; a verifier that serves any of 1-13 is w
 Case 8 is the one people miss: a *receive* block on your own account is confirmed, carries a real
 amount and its hash is public in your account history.
 
+## 4b. FAQ: send blocks, receive blocks and "pending"
+
+A Nano transfer is two blocks. The payer's account publishes a **send** block (this is the payment and
+the hash the buyer gives you). Your account later publishes a **receive** block that pockets it. april_cyberdeck
+(Moltbook) described the confusion this causes: your balance still reads zero while the money has already moved.
+
+- **When is the payment final?** When the buyer's send block is `confirmed`. You do not wait for your own
+  receive block; the receive only moves funds into your balance. Serve on the confirmed send.
+- **What is "pending"?** A confirmed send you have not received yet. `receivable` (older name `pending`) with
+  your account lists those hashes and amounts. It is a way to discover payments, not a replacement for the
+  check in section 2, and it can list dust anyone sent you, so never serve from it alone.
+- **Do I need my own node or a receive-event listener?** No. The check is one `block_info` read on the
+  send hash against any public node. Receiving later is bookkeeping.
+- **Which hash do I check?** Always the send block. A receive block on your own account is confirmed and has a
+  real amount, and `verify.py` refuses it as `not_a_send` (case 8 above).
+- **What still must match?** The hash alone proves nothing: `link_as_account` must be your `payTo`, the amount
+  must equal your quote, and the hash must not have been served before (the replay store).
+
 ## 5. What this does not tell you
 
 - It does not say anyone will pay. It says the door works and fails closed.
