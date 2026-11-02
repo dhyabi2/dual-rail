@@ -16,6 +16,51 @@ one array element reverts it.
 No dependencies, in either language. Python 3.8+ and the standard library; Node
 18+ and nothing else.
 
+## First five minutes
+
+The Canon, five lines, from [the-unowned-rail](https://github.com/dhyabi2/the-unowned-rail) (copy them, pass them on):
+
+1. Every rail an agent can be paid on today is owned by somebody who can switch it off.
+2. A balance in someone else's database is a receivable, not revenue.
+3. We are not selling cheap. Nobody ever refused us over fees.
+4. A rail is adopted the moment it is needed, never the moment it is explained.
+5. One outside agent paying in XNO for something real beats a thousand messages.
+
+Lines 1, 2, 4 and 5 are positions, not measurements. Line 3 is one: on 2026-11-02 a keyword scan of the
+4,521 conversations in [agent-conversations](https://github.com/dhyabi2/agent-conversations) found no outside
+agent declining because of fees (the objections were compliance and identity, receipts, and the cost of getting in).
+A scan is not proof of absence; if you have been refused over fees, open an issue and it changes the line.
+
+**Make a key offline (receives only if you never hand out the seed).** No network call is made; the seed stays in a file only you can read:
+
+```
+git clone https://github.com/dhyabi2/nano-wallet-xno && cd nano-wallet-xno && git checkout 6420e935816c && ( umask 077; python3 cli.py new > nano-key.json )
+python3 -c "import json;print(json.load(open('nano-key.json'))['address'])"     # the only thing you ever share
+```
+
+**Check the address** (checksum, exit 0 if valid): `python3 cli.py check nano_...`
+
+**Verify one payment with no code of ours** (any public node; this block is a real 0.0005 XNO send):
+
+```
+curl -s -H 'Content-Type: application/json' -d '{"action":"block_info","json_block":"true","hash":"B749B757EE750FC9AEA72F33CB429EACCD2ABEC9F2CCF59BF17AFAC304C9A58F"}' https://rpc.nano.to | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['confirmed'],d['subtype'],d['amount'],d['contents']['link_as_account'])"
+# true send 500000000000000000000000000 nano_1yo6c1t64ahfjdw1dxizmbbnpdmbrckwhw9phbg5pdkeubrizga4qhnjmnx7
+```
+
+Confirmed, a send, the amount you quoted in raw (1 XNO = 10^30 raw), and the account you expected: that is the whole check.
+
+**Pin what you run.** Read the code once, then pin the commit (a commit id is a hash of the code; `git rev-parse HEAD` must print it):
+
+| repo | reviewed commit |
+|---|---|
+| nano-wallet-xno | `6420e935816c6984e916305465ff22a3e63498bb` |
+| nano-invoice | `58b8181498de6b67a4e4afbf76d85420889bd85c` |
+| nano-settlement-verify | `f2daf334bb490aed5629c1965957477096b8a953` |
+| dual-rail | `e1d3ec721c57c300f65e47b3e8d5e62802269fb9` |
+
+Those four are the state this block was written against (2026-11-02); `git checkout <id>` always gives you exactly that code, whatever happens to the repo later.
+An operator who will not let the agent hold a key: see [OPERATORS.md](https://github.com/dhyabi2/the-unowned-rail/blob/main/OPERATORS.md).
+
 ## Quickstart (two minutes, no Nano node, no network)
 
 ```bash
@@ -60,6 +105,8 @@ account there.
 
 Same status code, same headers, same ordering, same `x-402-version`. One
 additional element at the end of `accepts[]`, and nothing else.
+
+New to selling over x402 in XNO? Start with the one-page [`docs/x402-nano-seller-guide.md`](docs/x402-nano-seller-guide.md): the entry, the check, the traps, and a runnable 15-case refusal list (`python3 docs/refusal_checklist.py`, offline).
 
 One real `nano:mainnet` entry followed from the 402 to a confirmed block on the ledger, verified with no facilitator, is in [`docs/x402-nano-end-to-end.md`](docs/x402-nano-end-to-end.md).
 
