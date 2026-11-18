@@ -78,10 +78,11 @@ python3 -m dual_rail.cli add --manifest https://your-service.example/.well-known
     --pay-to nano_YOUR_ADDRESS --amount 0.0001 --diff
 ```
 
-Install the Python package from PyPI:
+Install the Python package (PyPI release pending - `pip install dual-rail` does not work yet;
+this installs the same 1.3.0 package from a pinned commit):
 
 ```bash
-pip install dual-rail
+pip install "dual-rail @ git+https://github.com/dhyabi2/dual-rail@4bfdefda79f5535c44d26296b78f842c510c3d8b"
 ```
 
 That gives you the `dual-rail` command (the same CLI as `python3 -m dual_rail.cli`) and the
