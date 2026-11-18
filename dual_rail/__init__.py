@@ -6,7 +6,7 @@ The modules live in this package: dual_rail.adapter, dual_rail.verify, dual_rail
 The command line is `dual-rail` (installed) or `python3 -m dual_rail.cli` (from a checkout).
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 from dual_rail.adapter import dual_rail  # noqa: E402,F401
 
