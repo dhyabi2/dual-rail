@@ -145,7 +145,12 @@ def run(nano_invoice=None, manifest=None):
         except Exception as exc:  # a crashing case is a failed case, never a skipped one
             results.append({"case": name, "status": "fail", "detail": "%s: %s" % (type(exc).__name__, exc)})
 
-    add("refusal-probe", case_refusal_probe)
+    if os.path.isfile(os.path.join(ROOT, "docs", "refusal_checklist.py")):
+        add("refusal-probe", case_refusal_probe)
+    else:  # a pip install has no docs/: the case cannot run, so it is skipped (exit 5), never passed
+        results.append({"case": "refusal-probe", "status": "skipped",
+                        "detail": "needs a dual-rail checkout (docs/refusal_checklist.py is not installed by pip): "
+                                  "git clone https://github.com/dhyabi2/dual-rail and run the kit from it"})
     add("accepts-shape", lambda: case_accepts_shape(manifest))
     have = nano_invoice and os.path.isfile(os.path.join(nano_invoice, "nano_invoice", "core.py"))
     for name, tests in INVOICE_CASES.items():

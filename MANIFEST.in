@@ -7,3 +7,4 @@ graft api
 graft audits
 prune node/node_modules
 global-exclude *.py[cod]
+exclude tests/conformance-matrix.json

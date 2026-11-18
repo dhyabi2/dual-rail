@@ -65,7 +65,7 @@ An operator who will not let the agent hold a key: see [OPERATORS.md](https://gi
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 203 tests, includes the Python/Node conformance run
+python3 -m unittest discover -s tests          # 215 tests, includes the Python/Node conformance run
 (cd node && npm test)                           # 81 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
@@ -87,7 +87,10 @@ pip install dual-rail
 That gives you the `dual-rail` command (the same CLI as `python3 -m dual_rail.cli`) and the
 `dual_rail` package (`from dual_rail import dual_rail`). Since 1.3.0 every module lives inside
 `dual_rail/`: code that did `import verify` or `from adapter import dual_rail` against 1.2.0 now
-writes `from dual_rail import verify` / `from dual_rail import dual_rail`. The Node middleware is
+writes `from dual_rail import verify` / `from dual_rail import dual_rail`. The root scripts are
+gone too: `python3 cli.py`, `python3 acceptance_kit.py`, `python3 accepts_snippet.py` and
+`python3 usd_quote.py` become `python3 -m dual_rail.cli` (or `dual-rail`), `python3 -m dual_rail.acceptance_kit`,
+and so on; run them with `-m` from the checkout root, not by file path. The Node middleware is
 not on npm yet: `require('./node/dual-rail')` from a checkout.
 
 The `nano_3t6k35gi…` address in the examples is the public Nano **genesis**
@@ -164,7 +167,7 @@ Two commands a seller can run. Both read only: no key, no payment, nothing is in
 
 **`python3 -m dual_rail.acceptance_kit`** runs five cases a Nano-paid seller should pass, and exits 0 only if all five ran and passed
 (5 means a case was skipped, 1 means one failed). The last three need a [nano-invoice](https://github.com/dhyabi2/nano-invoice)
-checkout: `git clone --branch v0.2.1 https://github.com/dhyabi2/nano-invoice` and `--nano-invoice PATH`.
+checkout: `git clone --branch v0.2.1 https://github.com/dhyabi2/nano-invoice` and `--nano-invoice PATH`. `refusal-probe` needs a dual-rail checkout (its script is in `docs/`, which pip does not install): from a pip install it is reported skipped, so the kit exits 5 there, never 0.
 
 | case | what passing it proves |
 |---|---|
@@ -251,7 +254,7 @@ without a valid Nano payment goes through your gate untouched.
 
 ## CLI
 
-There is one CLI, and it is the Python one — `dual_rail/cli.py`. The Node package ships
+There is one CLI, and it is the Python one — `dual_rail/cli.py` (run it as `dual-rail` or `python3 -m dual_rail.cli`, not by file path). The Node package ships
 the middleware only; duplicating the verifier in two languages would give two
 things to keep in step and no more assurance, and the verifier talks HTTP to
 your endpoint rather than into either runtime.
@@ -429,7 +432,7 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 174 tests — OK
+Ran 215 tests — OK
 
 $ cd node && npm test
 # pass 81
