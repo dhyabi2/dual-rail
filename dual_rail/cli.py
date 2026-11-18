@@ -39,12 +39,12 @@ import sys
 import urllib.error
 import urllib.request
 
-import adapter as _adapter
-import challenge as _challenge
-import declaration
-import money
-import nanoaddr
-import verifiers as _verifiers
+from dual_rail import adapter as _adapter
+from dual_rail import challenge as _challenge
+from dual_rail import declaration
+from dual_rail import money
+from dual_rail import nanoaddr
+from dual_rail import verifiers as _verifiers
 
 EXIT_OK = 0
 EXIT_FAIL = 1

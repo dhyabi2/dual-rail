@@ -5,7 +5,7 @@ Price is fixed in USD cents. At request time the seller quotes a raw XNO amount 
 median of two independent feeds and the quote is valid for 60 seconds. A refund returns the
 SAME raw amount that was paid, so neither side carries FX exposure after settlement.
 
-Run:  python3 usd_quote.py 250        # quote $2.50 live from CoinGecko + KuCoin
+Run:  python3 -m dual_rail.usd_quote 250        # quote $2.50 live from CoinGecko + KuCoin
 """
 import json
 import sys

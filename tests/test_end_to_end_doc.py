@@ -29,8 +29,8 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import declaration
-import nanoaddr
+from dual_rail import declaration
+from dual_rail import nanoaddr
 
 DOC = os.path.join(ROOT, "docs", "x402-nano-end-to-end.md")
 

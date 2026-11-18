@@ -22,15 +22,15 @@ from wsgiref.util import setup_testing_defaults
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import adapter as _adapter
-import challenge as _challenge
-import cli
-import fakenode
-import money
-import nanoaddr
-import nanonode
-import testhost
-import verify as _verify
+from dual_rail import adapter as _adapter
+from dual_rail import challenge as _challenge
+from dual_rail import cli
+from dual_rail import fakenode
+from dual_rail import money
+from dual_rail import nanoaddr
+from dual_rail import nanonode
+from dual_rail import testhost
+from dual_rail import verify as _verify
 
 PAY_TO = "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3"
 BURN = "nano_1111111111111111111111111111111111111111111111111111hifc8npp"
@@ -676,7 +676,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def run_cli(args):
     """The real CLI, as a subprocess. Returns (code, stdout, stderr)."""
-    result = subprocess.run([sys.executable, os.path.join(HERE, "cli.py")] + args,
+    result = subprocess.run([sys.executable, "-m", "dual_rail.cli"] + args,
                             capture_output=True, text=True, cwd=HERE, timeout=120)
     return result.returncode, result.stdout, result.stderr
 

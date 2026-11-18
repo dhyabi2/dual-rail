@@ -7,8 +7,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import acceptance_kit as kit  # noqa: E402
-import challenge  # noqa: E402
+from dual_rail import acceptance_kit as kit  # noqa: E402
+from dual_rail import challenge  # noqa: E402
 
 PAY_TO = kit.PAY_TO
 
@@ -85,6 +85,17 @@ class Runner(unittest.TestCase):
             failed = {r["case"] for r in results if r["status"] == "fail"}
             self.assertEqual(failed, {"duplicate-retry", "attribution-tests", "buyer-recovery"})
             self.assertEqual(kit.exit_code(results), 1)
+
+    def test_refusal_probe_is_skipped_not_failed_without_a_checkout(self):
+        saved = kit.ROOT
+        try:
+            kit.ROOT = tempfile.mkdtemp()
+            results = kit.run()
+        finally:
+            kit.ROOT = saved
+        probe = [r for r in results if r["case"] == "refusal-probe"][0]
+        self.assertEqual(probe["status"], "skipped")
+        self.assertNotEqual(kit.exit_code(results), 0)
 
     def test_a_failure_outranks_a_skip(self):
         self.assertEqual(kit.exit_code([{"status": "fail"}, {"status": "skipped"}]), 1)

@@ -51,11 +51,11 @@ Read-only throughout: no key, no node, no network, no money. It parses a
 document and returns a verdict.
 """
 
-import money
-import nanoaddr
-import network as _network
+from dual_rail import money
+from dual_rail import nanoaddr
+from dual_rail import network as _network
 
-from network import kind, show
+from dual_rail.network import kind, show
 
 #: A Nano state block's balance field is 128 bits, so no amount above this can
 #: exist in a block at all. An entry asking for more is a typo, not a price.

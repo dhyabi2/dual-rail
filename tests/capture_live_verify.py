@@ -24,7 +24,7 @@ from wsgiref.simple_server import WSGIRequestHandler, make_server
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-import adapter                                                    # noqa: E402
+from dual_rail import adapter                                         # noqa: E402
 
 HEADER = '''dual-rail verify, run against a live endpoint
 =============================================
@@ -51,8 +51,8 @@ Note the two runs use DIFFERENT payment blocks. One payment buys one call, so
 the second run needs its own: that is the replay protection, not a flaky rail.
 
 '''
-import fakenode                                                   # noqa: E402
-import testhost                                                   # noqa: E402
+from dual_rail import fakenode                                        # noqa: E402
+from dual_rail import testhost                                        # noqa: E402
 
 PAY_TO = "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3"
 BLOCK_ONE = "9F2C" + "0" * 60
@@ -80,8 +80,8 @@ def main() -> int:
     try:
         for args in (["verify", url, "--payment", BLOCK_ONE],
                      ["verify", url, "--payment", BLOCK_TWO, "--json"]):
-            result = subprocess.run([sys.executable, os.path.join(HERE, "cli.py")] + args,
-                                    capture_output=True, text=True, timeout=120)
+            result = subprocess.run([sys.executable, "-m", "dual_rail.cli"] + args,
+                                    capture_output=True, text=True, cwd=HERE, timeout=120)
             shown = " ".join(a.replace(url, PUBLIC) for a in args)
             print("$ dual-rail %s" % shown)
             print(result.stdout.replace(url, PUBLIC))

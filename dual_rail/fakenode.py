@@ -9,7 +9,7 @@ matters is run with the node dead and the assertion is that nothing
 5xx'd.
 """
 
-import nanonode
+from dual_rail import nanonode
 
 
 class FakeNode(nanonode.NanoNode):

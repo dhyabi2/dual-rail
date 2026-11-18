@@ -19,15 +19,15 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import adapter as _adapter
-import challenge as _challenge
-import declaration as _declaration
-import fakenode
-import money
-import nanoaddr
-import network as _network
-import testhost
-import verify as _verify
+from dual_rail import adapter as _adapter
+from dual_rail import challenge as _challenge
+from dual_rail import declaration as _declaration
+from dual_rail import fakenode
+from dual_rail import money
+from dual_rail import nanoaddr
+from dual_rail import network as _network
+from dual_rail import testhost
+from dual_rail import verify as _verify
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MATRIX = os.path.join(HERE, "tests", "conformance-matrix.json")

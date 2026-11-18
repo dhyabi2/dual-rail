@@ -17,8 +17,8 @@ One `nano:mainnet` entry in `accepts[]`. Amounts are **raw, as a string of digit
 ```
 
 x402 v1 calls the price field `maxAmountRequired`, v2 calls it `amount`; send the one
-your declared `x402Version` uses (`python3 cli.py inspect <url>` reports which it found).
-Generate the patch instead of typing it: `python3 cli.py add --manifest <url> --pay-to nano_... --amount 0.0001 --diff`
+your declared `x402Version` uses (`python3 -m dual_rail.cli inspect <url>` reports which it found).
+Generate the patch instead of typing it: `python3 -m dual_rail.cli add --manifest <url> --pay-to nano_... --amount 0.0001 --diff`
 (read-only; allowed range 0.000001-100 XNO).
 
 ## 2. How the buyer pays and how you check
@@ -40,10 +40,10 @@ Require: `confirmed` is `"true"`, `subtype` is `"send"`, `contents.link_as_accou
 `payTo` (not `block_account`, which is the payer), and `amount` equals your quote. Checked
 today against block `B749B757...A58F`: `confirmed true`, `send`, `500000000000000000000000000`,
 paid to `nano_1yo6c1t64a...`. Self-contained alternatives that do the same read:
-`verify.py` here, [`nano-settlement-verify`](https://github.com/dhyabi2/nano-settlement-verify)
+`dual_rail/verify.py` here, [`nano-settlement-verify`](https://github.com/dhyabi2/nano-settlement-verify)
 (stdlib, one file), or a facilitator that supports it
 ([gosuda/x402-facilitator](https://github.com/gosuda/x402-facilitator), two nodes must agree;
-`python3 cli.py verifiers` checks live who can validate XNO today).
+`python3 -m dual_rail.cli verifiers` checks live who can validate XNO today).
 
 ## 3. Traps (each one cost somebody a payment or a sale)
 
@@ -56,7 +56,7 @@ paid to `nano_1yo6c1t64a...`. Self-contained alternatives that do the same read:
    **separate Nano-only path** and keep the USDC path untouched. Newer `@x402/fetch` 2.x clients are
    a different codebase; test your own buyers rather than assuming.
 2. **`nano:mainnet` is not in the x402 spec.** A client that does not know the network skips the
-   entry silently, which looks exactly like "nobody wants to pay in XNO". `python3 cli.py check <url>`
+   entry silently, which looks exactly like "nobody wants to pay in XNO". `python3 -m dual_rail.cli check <url>`
    tells you whether a client of your declared version would actually pay it.
 3. **A confirmed block proves someone paid you, not that they paid for this call.** Nano blocks have
    no memo field. Without a binding, one payment can be shown for two requests, or someone can show
@@ -70,8 +70,8 @@ paid to `nano_1yo6c1t64a...`. Self-contained alternatives that do the same read:
 5. **Wallets that round.** A wallet that rounds the amount to a few decimals drops the tag and the payment
    matches no invoice (nano-invoice, Limits). Hand the buyer the amount in raw, or a full-precision `nano:` URI.
 6. **Overpay and spelling.** gosuda compares the amount as an exact string, so an overpayment fails
-   there; `verify.py` accepts at least the amount and reports `overpaid_raw`. gosuda lower-cases `payTo`
-   text; `verify.py` and nano-settlement-verify compare the public key, so `xrb_` and `nano_` spellings
+   there; `dual_rail/verify.py` accepts at least the amount and reports `overpaid_raw`. gosuda lower-cases `payTo`
+   text; `dual_rail/verify.py` and nano-settlement-verify compare the public key, so `xrb_` and `nano_` spellings
    of one account match. Pick one rule and test it.
 7. **Raw is an integer.** Never parse with `float`: a double keeps 53 bits and a raw amount needs up
    to 128. nano-settlement-verify refuses a float `expect_raw` for this reason.
@@ -126,7 +126,7 @@ the hash the buyer gives you). Your account later publishes a **receive** block 
 - **Do I need my own node or a receive-event listener?** No. The check is one `block_info` read on the
   send hash against any public node. Receiving later is bookkeeping.
 - **Which hash do I check?** Always the send block. A receive block on your own account is confirmed and has a
-  real amount, and `verify.py` refuses it as `not_a_send` (case 8 above).
+  real amount, and `dual_rail/verify.py` refuses it as `not_a_send` (case 8 above).
 - **What still must match?** The hash alone proves nothing: `link_as_account` must be your `payTo`, the amount
   must equal your quote, and the hash must not have been served before (the replay store).
 

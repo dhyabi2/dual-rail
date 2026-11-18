@@ -1,6 +1,6 @@
 """acceptance_kit: one command, five cases a Nano-paid seller should be able to pass.
 
-    python3 acceptance_kit.py [--nano-invoice PATH_TO_CHECKOUT_AT_v0.2.1] [--manifest URL|FILE] [--list] [--json]
+    python3 -m dual_rail.acceptance_kit [--nano-invoice PATH_TO_CHECKOUT_AT_v0.2.1] [--manifest URL|FILE] [--list] [--json]
 
 Case                What it proves
 refusal-probe       a check that is meant to say no does say no: 15 offline payments, 1 honest and 14 that must
@@ -28,11 +28,12 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+ROOT = os.path.dirname(HERE)  # the checkout (or site-packages, when installed)
+sys.path.insert(0, ROOT)
 
-import challenge  # noqa: E402
-import nanoaddr  # noqa: E402
-import verify  # noqa: E402
+from dual_rail import challenge  # noqa: E402
+from dual_rail import nanoaddr  # noqa: E402
+from dual_rail import verify  # noqa: E402
 
 PAY_TO = "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3"
 SHAPE_REQUIRED = {"v1": ("scheme", "network", "maxAmountRequired", "resource", "description", "payTo",
@@ -52,8 +53,11 @@ INVOICE_CASES = {
 
 
 def case_refusal_probe():
-    done = subprocess.run([sys.executable, os.path.join(HERE, "docs", "refusal_checklist.py")],
-                          capture_output=True, text=True, timeout=120)
+    script = os.path.join(ROOT, "docs", "refusal_checklist.py")
+    if not os.path.isfile(script):
+        return False, "needs a dual-rail checkout (docs/refusal_checklist.py is not installed by pip)"
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([ROOT] + [p for p in [os.environ.get("PYTHONPATH")] if p]))
+    done = subprocess.run([sys.executable, script], capture_output=True, text=True, timeout=120, env=env)
     return done.returncode == 0, (done.stdout.strip().splitlines() or [""])[-1] or done.stderr[-200:]
 
 
@@ -80,7 +84,7 @@ def shape_problems(entry):
 
 
 def case_accepts_shape(manifest=None):
-    import cli
+    from dual_rail import cli
     emitted = challenge.nano_entry(PAY_TO, "0.0001", "https://example.dev/r")
     problems = ["emitted: " + p for p in shape_problems(emitted)]
     where = "the entry this package emits"
@@ -98,8 +102,8 @@ def case_accepts_shape(manifest=None):
 
 def case_replay_in_process():
     """The dual-rail half of duplicate-retry: a spent block is spent, in memory and on disk across a restart."""
-    import fakenode
-    import store
+    from dual_rail import fakenode
+    from dual_rail import store
     h = "%064X" % 1
     node = fakenode.FakeNode()
     node.settle(h, PAY_TO, 10 ** 26)
@@ -141,7 +145,12 @@ def run(nano_invoice=None, manifest=None):
         except Exception as exc:  # a crashing case is a failed case, never a skipped one
             results.append({"case": name, "status": "fail", "detail": "%s: %s" % (type(exc).__name__, exc)})
 
-    add("refusal-probe", case_refusal_probe)
+    if os.path.isfile(os.path.join(ROOT, "docs", "refusal_checklist.py")):
+        add("refusal-probe", case_refusal_probe)
+    else:  # a pip install has no docs/: the case cannot run, so it is skipped (exit 5), never passed
+        results.append({"case": "refusal-probe", "status": "skipped",
+                        "detail": "needs a dual-rail checkout (docs/refusal_checklist.py is not installed by pip): "
+                                  "git clone https://github.com/dhyabi2/dual-rail and run the kit from it"})
     add("accepts-shape", lambda: case_accepts_shape(manifest))
     have = nano_invoice and os.path.isfile(os.path.join(nano_invoice, "nano_invoice", "core.py"))
     for name, tests in INVOICE_CASES.items():

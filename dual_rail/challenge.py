@@ -14,8 +14,8 @@ through it, including the CLI's `--diff`.
 
 import copy
 
-import money
-import network as _network
+from dual_rail import money
+from dual_rail import network as _network
 
 NETWORK = "nano:mainnet"
 ASSET = "XNO"

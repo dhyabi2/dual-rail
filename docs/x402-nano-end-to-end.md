@@ -106,7 +106,7 @@ $ curl -s https://extract.paypercall.dev/.well-known/x402 | python3 -m json.tool
 And this repository's own checker agrees that an x402 v2 client would pay it:
 
 ```console
-$ python3 cli.py check https://extract.paypercall.dev/api/v1/nano-info
+$ python3 -m dual_rail.cli check https://extract.paypercall.dev/api/v1/nano-info
 
 dual-rail check https://extract.paypercall.dev/api/v1/nano-info
 
@@ -124,7 +124,7 @@ check: payable - an x402 client of the declared version would pay this Nano entr
 Exit code 0.
 
 This seller takes **only** XNO. A seller that already takes USDC would have its
-USDC entries first and this entry last; see the README for what `cli.py add`
+USDC entries first and this entry last; see the README for what `dual-rail add`
 appends.
 
 ## (b) How the buyer pays
@@ -141,7 +141,7 @@ header, for example:
 {"scheme": "exact", "network": "nano:mainnet", "payload": {"blockHash": "B749B757EE750FC9AEA72F33CB429EACCD2ABEC9F2CCF59BF17AFAC304C9A58F"}}
 ```
 
-That is the shape this repository's `verify.py` reads. It is also where the
+That is the shape this repository's `dual_rail/verify.py` reads. It is also where the
 gosuda facilitator in (d) looks: it reads `payload.blockHash`. This page did not
 make a send, so it shows a payment that already exists. Block
 `B749B757EE750FC9AEA72F33CB429EACCD2ABEC9F2CCF59BF17AFAC304C9A58F` is a 0.0005
@@ -181,12 +181,13 @@ Anyone can check this payment: the seller, the buyer, an auditor or a
 stranger. All it takes is the block hash, the quoted amount, `payTo` and one
 call to any Nano node. No account, API key or facilitator is needed.
 
-**With this repository's verify path** (`verify.py`, which is what the adapter
+**With this repository's verify path** (`dual_rail/verify.py`, which is what the adapter
 runs before it admits a Nano-paid request):
 
 ```console
 $ python3 -c '
-import json, nanonode, verify
+import json
+from dual_rail import nanonode, verify
 proof = json.dumps({"scheme": "exact", "network": "nano:mainnet",
                     "payload": {"blockHash": "B749B757EE750FC9AEA72F33CB429EACCD2ABEC9F2CCF59BF17AFAC304C9A58F"}})
 guard = verify.ReplayGuard()
@@ -300,8 +301,8 @@ itself is the same one shown in (c).
 
 Two differences, both read from the source. First, gosuda compares the amount
 as an exact string, so an overpayment fails there. This repository's
-`verify.py` accepts at least the amount and reports `overpaid_raw`. Second,
-gosuda compares `payTo` as lower-cased text, while `verify.py` and
+`dual_rail/verify.py` accepts at least the amount and reports `overpaid_raw`. Second,
+gosuda compares `payTo` as lower-cased text, while `dual_rail/verify.py` and
 `nano-settlement-verify` compare the public key, so the `xrb_` and `nano_`
 spellings of one account match.
 
@@ -321,4 +322,4 @@ spellings of one account match.
 - **That a second node agrees.** Only one node answered from here; see (c).
 - **That x402 defines `nano:mainnet`.** The x402 specification does not list
   it. A client that does not know the network skips the entry, which is why
-  `cli.py add` appends it last, beside USDC and never in place of it.
+  `dual-rail add` appends it last, beside USDC and never in place of it.

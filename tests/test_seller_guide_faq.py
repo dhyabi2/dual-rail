@@ -11,7 +11,7 @@ class TestSellerGuideFaq(unittest.TestCase):
         for word in ("send", "receive", "receivable", "confirmed", "not_a_send", "link_as_account", "replay"):
             self.assertIn(word, sec)
         # the refusal it cites is real
-        self.assertIn('"not_a_send"', open(os.path.join(HERE, "verify.py"), encoding="utf-8").read())
+        self.assertIn('"not_a_send"', open(os.path.join(HERE, "dual_rail", "verify.py"), encoding="utf-8").read())
 
 
 if __name__ == "__main__":

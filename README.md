@@ -65,7 +65,7 @@ An operator who will not let the agent hold a key: see [OPERATORS.md](https://gi
 
 ```bash
 git clone https://github.com/dhyabi2/dual-rail && cd dual-rail
-python3 -m unittest discover -s tests          # 203 tests, includes the Python/Node conformance run
+python3 -m unittest discover -s tests          # 215 tests, includes the Python/Node conformance run
 (cd node && npm test)                           # 81 tests
 python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1, adapter mounted, 7/7 verify
 ```
@@ -73,15 +73,25 @@ python3 tests/capture_live_verify.py            # real HTTP server on 127.0.0.1,
 Then point it at your own 402 (read-only, changes nothing):
 
 ```bash
-python3 cli.py inspect https://your-service.example/.well-known/x402
-python3 cli.py add --manifest https://your-service.example/.well-known/x402 \
+python3 -m dual_rail.cli inspect https://your-service.example/.well-known/x402
+python3 -m dual_rail.cli add --manifest https://your-service.example/.well-known/x402 \
     --pay-to nano_YOUR_ADDRESS --amount 0.0001 --diff
 ```
 
-Not published to PyPI or npm yet: install from this repository
-(`pip install "dual-rail @ git+https://github.com/dhyabi2/dual-rail@v1.2.0"` for the
-v1.2.0 release, `pip install git+https://github.com/dhyabi2/dual-rail` for unpinned main, or
-`require('./node/dual-rail')` from a checkout).
+Install the Python package from PyPI:
+
+```bash
+pip install dual-rail
+```
+
+That gives you the `dual-rail` command (the same CLI as `python3 -m dual_rail.cli`) and the
+`dual_rail` package (`from dual_rail import dual_rail`). Since 1.3.0 every module lives inside
+`dual_rail/`: code that did `import verify` or `from adapter import dual_rail` against 1.2.0 now
+writes `from dual_rail import verify` / `from dual_rail import dual_rail`. The root scripts are
+gone too: `python3 cli.py`, `python3 acceptance_kit.py`, `python3 accepts_snippet.py` and
+`python3 usd_quote.py` become `python3 -m dual_rail.cli` (or `dual-rail`), `python3 -m dual_rail.acceptance_kit`,
+and so on; run them with `-m` from the checkout root, not by file path. The Node middleware is
+not on npm yet: `require('./node/dual-rail')` from a checkout.
 
 The `nano_3t6k35gi…` address in the examples is the public Nano **genesis**
 account, used only because it is a valid, well-known address. Put your own
@@ -107,9 +117,9 @@ account there.
 Same status code, same headers, same ordering, same `x-402-version`. One
 additional element at the end of `accepts[]`, and nothing else.
 
-New to selling over x402 in XNO? Start with the one-page [`docs/x402-nano-seller-guide.md`](docs/x402-nano-seller-guide.md): the entry, the check, the traps, and a runnable 15-case refusal list (`python3 docs/refusal_checklist.py`, offline).
+New to selling over x402 in XNO? Start with the one-page [`docs/x402-nano-seller-guide.md`](https://github.com/dhyabi2/dual-rail/blob/main/docs/x402-nano-seller-guide.md): the entry, the check, the traps, and a runnable 15-case refusal list (`python3 docs/refusal_checklist.py`, offline).
 
-One real `nano:mainnet` entry followed from the 402 to a confirmed block on the ledger, verified with no facilitator, is in [`docs/x402-nano-end-to-end.md`](docs/x402-nano-end-to-end.md).
+One real `nano:mainnet` entry followed from the 402 to a confirmed block on the ledger, verified with no facilitator, is in [`docs/x402-nano-end-to-end.md`](https://github.com/dhyabi2/dual-rail/blob/main/docs/x402-nano-end-to-end.md).
 
 `maxAmountRequired` is in **raw**, the asset's atomic unit, which is what
 `extra.decimals: 30` declares it to be — 10\*\*30 raw to the XNO, so the
@@ -155,9 +165,9 @@ Not done: the Node binding has no equivalent yet, and the binding does not cover
 
 Two commands a seller can run. Both read only: no key, no payment, nothing is installed.
 
-**`python3 acceptance_kit.py`** runs five cases a Nano-paid seller should pass, and exits 0 only if all five ran and passed
+**`python3 -m dual_rail.acceptance_kit`** runs five cases a Nano-paid seller should pass, and exits 0 only if all five ran and passed
 (5 means a case was skipped, 1 means one failed). The last three need a [nano-invoice](https://github.com/dhyabi2/nano-invoice)
-checkout: `git clone --branch v0.2.1 https://github.com/dhyabi2/nano-invoice` and `--nano-invoice PATH`.
+checkout: `git clone --branch v0.2.1 https://github.com/dhyabi2/nano-invoice` and `--nano-invoice PATH`. `refusal-probe` needs a dual-rail checkout (its script is in `docs/`, which pip does not install): from a pip install it is reported skipped, so the kit exits 5 there, never 0.
 
 | case | what passing it proves |
 |---|---|
@@ -167,7 +177,7 @@ checkout: `git clone --branch v0.2.1 https://github.com/dhyabi2/nano-invoice` an
 | `attribution-tests` | exact amount pays and records the chain's sender; off by one raw pays nothing; short is underpaid; after expiry is late |
 | `buyer-recovery` | the invoice id re-derives from merchant and order key, the same order key returns the same invoice, a duplicate is refunded |
 
-**`python3 accepts_snippet.py --manifest URL --pay-to nano_... [--usd 0.01 | --amount 0.0001] [--framework python|node]`**
+**`python3 -m dual_rail.accepts_snippet --manifest URL --pay-to nano_... [--usd 0.01 | --amount 0.0001] [--framework python|node]`**
 reads your own x402 manifest and prints the exact modified manifest (your entries untouched, one Nano entry appended), its
 diff, the server change, and a test that fails if an existing entry changed. With `--usd` the price stays in dollars:
 converted to raw at read time from two independent feeds (refused if they differ by more than 2 percent, rounded up), valid
@@ -193,7 +203,7 @@ verify: 7/7 pass - both rails live, existing rails unchanged.
 ```
 
 Exit 0 only if all seven hold. A captured run against a live endpoint is in
-[`tests/verify-against-a-live-endpoint.txt`](tests/verify-against-a-live-endpoint.txt),
+[`tests/verify-against-a-live-endpoint.txt`](https://github.com/dhyabi2/dual-rail/blob/main/tests/verify-against-a-live-endpoint.txt),
 whose header says precisely what that run does and does not prove.
 
 `--payment` is spent by the run: one payment buys one call, so verifying twice
@@ -217,7 +227,7 @@ app.use(dualRail({
 ### Python / WSGI (Flask, FastAPI via WSGI, anything)
 
 ```python
-from adapter import dual_rail
+from dual_rail import dual_rail
 
 rail = dual_rail(payTo="nano_3t6k35gi…", amountXno="0.0001",
                  nodeUrl=os.environ["NANO_NODE_URL"])
@@ -244,7 +254,7 @@ without a valid Nano payment goes through your gate untouched.
 
 ## CLI
 
-There is one CLI, and it is the Python one — `cli.py`. The Node package ships
+There is one CLI, and it is the Python one — `dual_rail/cli.py` (run it as `dual-rail` or `python3 -m dual_rail.cli`, not by file path). The Node package ships
 the middleware only; duplicating the verifier in two languages would give two
 things to keep in step and no more assurance, and the verifier talks HTTP to
 your endpoint rather than into either runtime.
@@ -266,14 +276,14 @@ an already-patched manifest it exits 0 with `already_present` and emits nothing.
 ## Who can validate an XNO payment today?
 
 ```
-python3 cli.py verifiers [--json]
+python3 -m dual_rail.cli verifiers [--json]
 ```
 
 Checked live each run, never from a list: (1) a `block_info` read against a
 public Nano node (`https://rpc.nano.to` unless `--node`) - this is
 self-verification with no facilitator and no custodian, because the payer
 broadcasts its own signed send block and any node shows it to anyone; it is the
-read `verify.py` makes; (2) [gosuda/x402-facilitator](https://github.com/gosuda/x402-facilitator),
+read `dual_rail/verify.py` makes; (2) [gosuda/x402-facilitator](https://github.com/gosuda/x402-facilitator),
 whose main-branch README must still have a `### Nano` section naming
 `nano:mainnet` with `exact` ticked. It is reported `custodial: false` only while
 that section says the payer broadcasts its own block and the facilitator is
@@ -298,7 +308,7 @@ attempted**. From your side that is indistinguishable from nobody wanting to pay
 in XNO.
 
 ```
-$ python3 cli.py check https://your-service.example/.well-known/x402
+$ python3 -m dual_rail.cli check https://your-service.example/.well-known/x402
 
 accepts[1]  network "nano-mainnet"
   x402 v2: 3 problem(s)
@@ -354,7 +364,7 @@ to end. It now reads both, one resource at a time — flattening them would
 invent an `accepts[]` no client ever sees and make an entry's index meaningless:
 
 ```
-$ python3 cli.py check https://extract.paypercall.dev/.well-known/x402
+$ python3 -m dual_rail.cli check https://extract.paypercall.dev/.well-known/x402
 
 x402 version declared: 2
 document:              resource catalogue, 24 resource(s)
@@ -392,7 +402,7 @@ around them.
 
 `nano:mainnet` is the canonical spelling and the only one x402 v2 accepts.
 `nano-mainnet` is also in the wild: legal under v1, whose `NetworkSchemaV1` is
-any non-empty string, and refused by v2. `network.py` / `node/network.js` read
+any non-empty string, and refused by v2. `dual_rail/network.py` / `node/network.js` read
 both as mainnet, emit the canonical one, and tell you which you were given.
 
 A bare `nano` or `xno` is **refused**, not assumed: it names the family without
@@ -422,7 +432,7 @@ in the low-order digits. Underpayment by a single raw is underpayment.
 
 ```
 $ python3 -m unittest discover -s tests
-Ran 174 tests — OK
+Ran 215 tests — OK
 
 $ cd node && npm test
 # pass 81

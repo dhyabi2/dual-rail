@@ -11,7 +11,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import fakenode, verify  # noqa: E402
+from dual_rail import fakenode, verify  # noqa: E402
 
 PAY_TO = "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3"  # public genesis account
 OTHER = "nano_1111111111111111111111111111111111111111111111111111hifc8npp"

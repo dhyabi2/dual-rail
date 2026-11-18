@@ -18,7 +18,7 @@ the node and the README fetcher are injected, so tests need no network.
 
 import urllib.request
 
-import nanonode
+from dual_rail import nanonode
 
 DEFAULT_NODE = "https://rpc.nano.to"
 GOSUDA_README = ("https://raw.githubusercontent.com/gosuda/x402-facilitator/"

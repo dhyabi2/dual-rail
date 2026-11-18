@@ -28,11 +28,11 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import challenge as _challenge
-import declaration
-import money
-import network
-import testhost
+from dual_rail import challenge as _challenge
+from dual_rail import declaration
+from dual_rail import money
+from dual_rail import network
+from dual_rail import testhost
 
 OURS = "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3"
 THEIRS = "nano_1111111111111111111111111111111111111111111111111111hifc8npp"
