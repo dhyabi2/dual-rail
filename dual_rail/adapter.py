@@ -25,13 +25,13 @@ middleware, and `opts.gate` to admit.
 
 import json
 
-import binding as _binding
-import challenge as _challenge
-import money
-import nanoaddr
-import nanonode
-import store as _store
-import verify as _verify
+from dual_rail import binding as _binding
+from dual_rail import challenge as _challenge
+from dual_rail import money
+from dual_rail import nanoaddr
+from dual_rail import nanonode
+from dual_rail import store as _store
+from dual_rail import verify as _verify
 
 PAYMENT_HEADER = "X-PAYMENT"
 WSGI_PAYMENT_KEY = "HTTP_X_PAYMENT"

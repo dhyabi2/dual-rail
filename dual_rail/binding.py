@@ -32,8 +32,8 @@ import hashlib
 import hmac
 import time
 
-import ed25519_blake2b as _ed
-import nanoaddr
+from dual_rail import ed25519_blake2b as _ed
+from dual_rail import nanoaddr
 
 SCHEME = "nano-block-sig/1"
 PREFIX = b"nano-402-binding/1\n"

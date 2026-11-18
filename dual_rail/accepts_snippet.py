@@ -1,7 +1,7 @@
 """accepts_snippet: paste-in generator for the Nano accept-leg, keyed to a seller's own manifest.
 
-    python3 accepts_snippet.py --manifest URL|FILE --pay-to nano_... [--usd 0.01 | --amount 0.0001]
-                               [--framework python|node] [--out-dir DIR]
+    python3 -m dual_rail.accepts_snippet --manifest URL|FILE --pay-to nano_... [--usd 0.01 | --amount 0.0001]
+                                         [--framework python|node] [--out-dir DIR]
 
 Reads the seller's x402 challenge/manifest (read-only) and prints, as one JSON object (or files in --out-dir):
   * manifest        the exact modified document: their accepts[] with ONE Nano entry appended, nothing else changed
@@ -23,11 +23,11 @@ import os
 import sys
 import time
 
-import challenge as _challenge
-import cli as _cli
-import money
-import nanoaddr
-import usd_quote
+from dual_rail import challenge as _challenge
+from dual_rail import cli as _cli
+from dual_rail import money
+from dual_rail import nanoaddr
+from dual_rail import usd_quote
 
 EXIT_OK, EXIT_USAGE, EXIT_NOT_ADDITIVE, EXIT_NO_PRICE = 0, 2, 3, 4
 RULE = ("Price is fixed in USD. At request time the seller converts it to raw XNO from the median of two "
@@ -94,7 +94,7 @@ PY_BEFORE = """from myapp import protected_app, x402_middleware
 application = x402_middleware(protected_app)
 """
 PY_AFTER_FIXED = """import os
-from adapter import dual_rail
+from dual_rail.adapter import dual_rail
 from myapp import protected_app, x402_middleware
 
 PAY_TO = "%(pay_to)s"
@@ -102,10 +102,10 @@ rail = dual_rail(payTo=PAY_TO, amountXno="%(amount_xno)s", nodeUrl=os.environ["N
 application = rail.wsgi(protected_app, gate=x402_middleware)
 """
 PY_AFTER_USD = """import os, time
-from adapter import dual_rail
-from verify import ReplayGuard
-from usd_quote import quote, feed_coingecko, feed_kucoin
-from money import raw_to_xno
+from dual_rail.adapter import dual_rail
+from dual_rail.verify import ReplayGuard
+from dual_rail.usd_quote import quote, feed_coingecko, feed_kucoin
+from dual_rail.money import raw_to_xno
 from myapp import protected_app, x402_middleware
 
 PAY_TO, CENTS, GUARD, _R = "%(pay_to)s", %(usd_cents)d, ReplayGuard(), [None, 0.0]

@@ -29,11 +29,11 @@ a seed or key, and the module has no code path that could.
 import json
 import os
 
-import challenge as _challenge
-import money
-import nanoaddr
-import nanonode
-import verify as _verify
+from dual_rail import challenge as _challenge
+from dual_rail import money
+from dual_rail import nanoaddr
+from dual_rail import nanonode
+from dual_rail import verify as _verify
 
 NETWORK = "nano:mainnet"
 MAX_BODY = 64 * 1024

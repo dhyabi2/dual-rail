@@ -20,11 +20,11 @@ import binascii
 import json
 import re
 
-import binding as _binding
-import challenge as _challenge
-import money
-import nanoaddr
-import nanonode
+from dual_rail import binding as _binding
+from dual_rail import challenge as _challenge
+from dual_rail import money
+from dual_rail import nanoaddr
+from dual_rail import nanonode
 
 
 def _same_account(left, right) -> bool:

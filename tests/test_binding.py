@@ -16,13 +16,13 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import binding
-import ed25519_blake2b as ed
-import fakenode
-import nanoaddr
-import store
-import testhost
-import verify as _verify
+from dual_rail import binding
+from dual_rail import ed25519_blake2b as ed
+from dual_rail import fakenode
+from dual_rail import nanoaddr
+from dual_rail import store
+from dual_rail import testhost
+from dual_rail import verify as _verify
 from test_dual_rail import AMOUNT_RAW, BLOCK, PAY_TO, build, request
 
 SECRET = b"0123456789abcdef-test-secret-only"

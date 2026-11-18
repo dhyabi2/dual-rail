@@ -7,8 +7,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import acceptance_kit as kit  # noqa: E402
-import challenge  # noqa: E402
+from dual_rail import acceptance_kit as kit  # noqa: E402
+from dual_rail import challenge  # noqa: E402
 
 PAY_TO = kit.PAY_TO
 

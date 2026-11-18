@@ -15,9 +15,9 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import cli
-import fakenode
-import verifiers
+from dual_rail import cli
+from dual_rail import fakenode
+from dual_rail import verifiers
 
 GOSUDA_README = """# x402-facilitator
 

@@ -12,8 +12,7 @@ license = {text = "MIT"}
 keywords = ["x402", "nano", "xno", "payments", "wsgi", "middleware", "agent"]
 
 [project.scripts]
-dual-rail = "cli:main"
+dual-rail = "dual_rail.cli:main"
 
 [tool.setuptools]
-py-modules = ["adapter", "binding", "store", "ed25519_blake2b", "challenge", "declaration", "network", "verify", "money",
-              "nanoaddr", "nanonode", "verifiers", "cli", "fakenode", "testhost", "usd_quote", "accepts_snippet", "acceptance_kit"]
+packages = ["dual_rail"]

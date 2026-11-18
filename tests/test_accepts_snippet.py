@@ -11,9 +11,9 @@ import unittest
 from contextlib import redirect_stdout
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import accepts_snippet as snip  # noqa: E402
-import testhost  # noqa: E402
-import usd_quote  # noqa: E402
+from dual_rail import accepts_snippet as snip  # noqa: E402
+from dual_rail import testhost  # noqa: E402
+from dual_rail import usd_quote  # noqa: E402
 
 PAY_TO = "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3"
 USDC = {"scheme": "exact", "network": "base", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",

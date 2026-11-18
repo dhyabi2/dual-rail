@@ -1,7 +1,7 @@
 """Hosted facilitator laws. No socket: FakeNode / DeadNode stand in for the node."""
 import json, os, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import fakenode, hosted_facilitator as hf, money, verify
+from dual_rail import fakenode, hosted_facilitator as hf, money, verify
 
 PAY_TO = "nano_1yo6c1t64ahfjdw1dxizmbbnpdmbrckwhw9phbg5pdkeubrizga4qhnjmnx7"
 H = "B749B757EE750FC9AEA72F33CB429EACCD2ABEC9F2CCF59BF17AFAC304C9A58F"
