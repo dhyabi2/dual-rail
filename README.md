@@ -78,11 +78,10 @@ python3 -m dual_rail.cli add --manifest https://your-service.example/.well-known
     --pay-to nano_YOUR_ADDRESS --amount 0.0001 --diff
 ```
 
-Install the Python package (PyPI release pending - `pip install dual-rail` does not work yet;
-this installs the same 1.3.0 package from a pinned commit):
+Install the Python package from PyPI:
 
 ```bash
-pip install "dual-rail @ git+https://github.com/dhyabi2/dual-rail@4bfdefda79f5535c44d26296b78f842c510c3d8b"
+pip install dual-rail==1.3.0
 ```
 
 That gives you the `dual-rail` command (the same CLI as `python3 -m dual_rail.cli`) and the
@@ -521,6 +520,6 @@ Foundation or x402 Foundation project.
   send destination, anything that is not a send is refused as `not_a_send`, and
   the two accounts are compared by public key rather than by the `nano_`/`xrb_`
   spelling a node happens to serve.
-- Version 1.0.0; not yet on PyPI or npm.
+- Python package 1.3.0, on PyPI; the Node middleware (1.0.0) is not on npm yet.
 
 MIT licensed - see `LICENSE`.
