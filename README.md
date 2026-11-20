@@ -1,5 +1,20 @@
 # dual-rail — add XNO **beside** USDC/x402, never instead of it
 
+```bash
+pip install dual-rail==1.3.0
+```
+
+```python
+import json
+from dual_rail import dual_rail
+usdc = {"scheme": "exact", "network": "base", "asset": "USDC", "maxAmountRequired": "10000"}
+rail = dual_rail(payTo="nano_3z335ug5oz6sxfgcfz3kdqdrgn5otx7ht3epuc3kuimka6hc59xqem1jrzqy", amountXno="0.0001")
+print(json.dumps(rail.patch_challenge({"x402Version": 2, "accepts": [usdc]})["accepts"], indent=2))
+```
+
+That prints your `accepts[]` with the USDC entry untouched and one `nano:mainnet` XNO entry
+appended (0.0001 XNO, in raw). Offline, no node needed; put your own `nano_` address in `payTo`.
+
 **If our rail fails, yours keeps selling.** Every error on the Nano side — an
 unreachable node, a timeout, a malformed proof, a block we cannot find — falls
 through to your existing rails exactly as if this adapter were not installed.
